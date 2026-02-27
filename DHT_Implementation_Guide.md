@@ -18,8 +18,8 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 ### 0.2 Shared Utilities (build once, use everywhere)
 - [ x ] Define a **message format** — decide on serialization (struct, delimited string, JSON, etc.)
 - [ x ] Write `send_message()` / `recv_message()` helpers over UDP
-- [ ] Implement a `find_next_prime(n)` helper (needed for hash table sizing)
-- [ ] Implement the two-level hash:  
+- [ x ] Implement a `find_next_prime(n)` helper (needed for hash table sizing)
+- [ x ] Implement the two-level hash:  
   ```
   pos = event_id % table_size
   id  = pos % ring_size
