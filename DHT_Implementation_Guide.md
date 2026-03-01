@@ -43,8 +43,8 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 | **State store** | Data structure mapping peer-name → `{name, ipv4, m_port, p_port, state}` where state ∈ {Free, Leader, InDHT} |
 | **Main loop** | `while True`: receive a message, dispatch to the appropriate handler, send response |
 
-- [ ] Implement the manager main loop
-- [ ] Implement internal state data structure
+- [x] Implement the manager main loop
+- [x] Implement internal state data structure
 
 ---
 
