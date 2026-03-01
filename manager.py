@@ -182,6 +182,7 @@ def Manager():
 
         else:
             print("[ERROR] Unknown Command")
+            server_socket.sendto(b'FAILURE', peer_address)
 
 #Call Manager function on startup
 if __name__ == "__main__":
