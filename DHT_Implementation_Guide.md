@@ -59,8 +59,8 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 
 ### Task M3 — Manager: `setup-dht` Command
 
-- [ ] Parse `setup-dht <peer-name> <n> <YYYY>`
-- [ ] Validate: peer registered, n ≥ 3, enough Free peers, no existing DHT
+- [x] Parse `setup-dht <peer-name> <n> <YYYY>`
+- [x] Validate: peer registered, n ≥ 3, enough Free peers, no existing DHT
 - [ ] Set leader state → `Leader`; pick n−1 random Free peers → `InDHT`
 - [ ] Respond with `SUCCESS` + list of n 3-tuples (leader first)
 - [ ] Enter a **blocking state**: reject all messages except `dht-complete`
@@ -69,9 +69,9 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 
 ### Task M4 — Manager: `dht-complete` Command
 
-- [ ] Parse `dht-complete <peer-name>`
-- [ ] Validate sender is the current leader
-- [ ] Respond `SUCCESS`; exit blocking state (now accept all commands except `setup-dht`)
+- [x] Parse `dht-complete <peer-name>`
+- [X] Validate sender is the current leader
+- [x] Respond `SUCCESS`; exit blocking state (now accept all commands except `setup-dht`)
 
 ---
 
@@ -147,7 +147,7 @@ This is the largest single task. Break it into sub-steps:
 ### Task F1 — Peer: `query-dht` & Hot Potato Query (§1.2.2)
 
 #### F1a — Manager Side
-- [ ] Parse `query-dht <peer-name>`
+- [x] Parse `query-dht <peer-name>`
 - [ ] Validate: DHT complete, peer registered & Free
 - [ ] Pick random DHT peer, respond with its 3-tuple + `SUCCESS`
 

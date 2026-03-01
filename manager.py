@@ -1,8 +1,11 @@
 import socket
 import sys
+import random
 
-#INITIAL MANAGER SOCKET VARIABLES
+#GLOBAL VARIABLES
 HOST = '127.0.0.1'
+DHT_EXISTS = False
+DHT_SETUP_IN_PROGRESS = False
 
 #DATA STRUCTURES
 class Peer:
@@ -18,6 +21,7 @@ class PeerList:
         self.peers = {}
         self.taken_m_ports = set()
         self.taken_p_ports = set()
+
 
 #REGISTER
 def register(peer_list: PeerList, peer_name: str, ipv4_address: str, m_port: int, p_port: int) -> bool:
@@ -36,6 +40,42 @@ def register(peer_list: PeerList, peer_name: str, ipv4_address: str, m_port: int
     peer_list.taken_p_ports.add(p_port)
     return True
 
+#SETUP-DHT NOT COMPLETED
+def setupDHT(peer_list: PeerList, peer_name: str, n: int, year: int):
+    #list to return n-1 peers
+    in_dht_peers = set()
+    #Validate setup
+    if not peer_name in peer_list.peers:
+        return False, in_dht_peers
+    if n < 3:
+        return False, in_dht_peers
+    if len(peer_list.peers) < n:
+        return False, in_dht_peers
+    if DHT_EXISTS:
+        return False, in_dht_peers
+    
+    #set peer to Leader
+    peer_list.peers[peer_name].state = "Leader"
+    count = 0
+    while count < (n-1):
+        key, value = random.choice(list(peer_list.peers.items()))
+        if key != peer_name and value.state == "Free":
+            count = count + 1
+            peer_list.peers[key].state = "InDHT"
+            in_dht_peers.add(key)
+    
+    return True, in_dht_peers
+
+#DHT-COMPLETE
+def dhtComplete(peer_list: PeerList, peer_name: str) -> bool:
+    #validate peer name
+    if not peer_name in peer_list.peers:
+        return False
+    if peer_list.peers[peer_name].state != "Leader":
+        return False
+    #else dht is complete
+    return True
+
 #Main Manager Program
 def Manager():
     #Input validation for port number
@@ -52,8 +92,10 @@ def Manager():
     server_socket.bind((HOST, SERVER_PORT))
     print(f"UDP server is listening on {HOST}:{SERVER_PORT}")
 
-    #initialize peer list
+    #initialize peer list and global variables
     peer_list = PeerList()
+    global DHT_EXISTS
+    global DHT_SETUP_IN_PROGRESS
 
     #Infinite Listening Loop
     while True:
@@ -106,8 +148,21 @@ def Manager():
                 continue
             #Extract dht-complete arguments
             peer_name = message_sections[1]
-
-            print("[DEBUG] Command: dht-complete, command not yet supported")
+            
+            #check global variables
+            if not DHT_SETUP_IN_PROGRESS or DHT_EXISTS:
+                server_socket.sendto(b'FAILURE', peer_address)
+                continue
+            
+            #call function
+            if dhtComplete(peer_list=peer_list, peer_name=peer_name):
+                DHT_EXISTS = True
+                DHT_SETUP_IN_PROGRESS = False
+                server_socket.sendto(b'SUCCESS', peer_address)
+                continue
+            else:
+                server_socket.sendto(b'FAILURE', peer_address)
+                continue
 
         elif command == "query-dht":
             #Validate input length
