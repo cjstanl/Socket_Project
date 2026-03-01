@@ -50,10 +50,10 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 
 ### Task M2 — Manager: `register` Command
 
-- [ ] Parse `register <peer-name> <ipv4> <m-port> <p-port>`
-- [ ] Validate: unique peer-name and unique port pair
-- [ ] Store peer info, set state = `Free`
-- [ ] Respond `SUCCESS` or `FAILURE`
+- [x] Parse `register <peer-name> <ipv4> <m-port> <p-port>`
+- [x] Validate: unique peer-name and unique port pair
+- [x] Store peer info, set state = `Free`
+- [x] Respond `SUCCESS` or `FAILURE`
 
 ---
 
