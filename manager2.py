@@ -61,6 +61,11 @@ def Manager():
         message = payload.decode()
         #split message into tokens for parsing
         tokens = message.strip().split()
+        #Check for empty message
+        if not tokens:
+            manager_socket.sendto(b'FAILURE', peer_address)
+            continue
+        
         #Extract command from message
         command = tokens[0]
 
@@ -133,7 +138,6 @@ def Manager():
                 continue
 
             #SETUP-DHT PROTOCOL
-            DHT_SETUP_IN_PROGRESS = True # Update setup flag to prevent other commands
             #update peer status to leader
             peer_list[peer_name].state = "Leader"
             peer_returns = [] #list of selected peers
@@ -161,6 +165,7 @@ def Manager():
             for peer in peer_returns:
                 returnMessage = returnMessage + " " + peer.name + " " + peer.ip + " " + str(peer.p_port)
             
+            DHT_SETUP_IN_PROGRESS = True # Update setup flag to prevent other commands
             #Send response
             manager_socket.sendto(returnMessage.encode(), peer_address)
 
@@ -174,6 +179,19 @@ def Manager():
 
             #EXTRACT PARAMETERS
             peer_name = tokens[1]
+
+            #PARAMETER VALIDATION
+            #peer must registered and be the leader
+            if not peer_name in peer_list:
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+            if peer_list[peer_name].state != "Leader":
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+            else:
+                DHT_SETUP_IN_PROGRESS = False
+                DHT_EXISTS = True
+                manager_socket.sendto(b'SUCCESS', peer_address)
 
         elif command == "query-dht":
             #QUERY-DHT COMMAND
