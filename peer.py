@@ -1,53 +1,9 @@
 import socket
+import sys
+import threading
 import csv
-import os
 
-# Define server and client connection details
-HOST = '127.0.0.1'
-SERVER_PORT = 6501
-CLIENT_PORT = 6502
-
-# TODO: Temp - needs to be changed
-filepath = './Data'
-filename = 'Stormdata_1950.csv'
-
-# Initialize a UDP socket for the client
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-# Bind the client to the specified host and port
-client_socket.bind((HOST, CLIENT_PORT))
-
-# Send an initial message to the server
-message = "Hello from UDP client!"
-client_socket.sendto(message.encode(), (HOST, SERVER_PORT))
-
-# Wait for a response from the server and print it
-message, server_address = client_socket.recvfrom(1024)
-print(f"Message from server: {message.decode()}")
-
-# Close the socket connection
-client_socket.close()
-
-# TODO: Temp - remove later
-def temp_dht_simulator():
-    """
-    Simulates the setup phase of the Distributed Hash Table (DHT) by:
-    1. Parsing a CSV file to count the number of storm events.
-    2. Calculating the next prime number based on the event count to determine the hash table size.
-    
-    Parameters:
-        None
-    
-    Returns:
-        None
-    """
-    file = os.path.join(filepath, filename)
-    num_events = count_storm_events_csv(file)
-    next_prime = find_next_prime(num_events)
-    print(f'Total events: {num_events}')
-    print(f'Next Prime: {next_prime}')
-
-
-
+#UTILITY FUNCTIONS
 def count_storm_events_csv(filename):
     """
     Reads a CSV file containing storm data and counts the total number of event records.
@@ -103,7 +59,6 @@ def find_next_prime(total_storm_events):
         else:
             current_num = current_num + 1
 
-# Source: https://nickyreinert.medium.com/how-to-find-prime-numbers-fast-8d0f7e8bd80f
 def is_prime(num):
     """
     Determines whether a given number is a prime number.
@@ -119,6 +74,8 @@ def is_prime(num):
         return False
     elif num == 2:
         return True
+    elif num == 3:
+        return True
 
     sqr_root_value = int(num ** 0.5)
     for i in range (3, sqr_root_value + 1, 2):
@@ -127,5 +84,239 @@ def is_prime(num):
 
     return True
 
-# TODO: Remove later
-temp_dht_simulator()
+#Thread to listen for peer to peer messages
+#   - Function takes the peer socket and listens infintely for peer messages
+def peer2peer_Listener(peer2peer_socket):
+    #Peer to Peer Variables
+    identifier = 0
+    ring_size = 0
+
+    #Infinite loop listening for messages
+    while True:
+        #READ MESSAGE
+        payload, peer_address = peer2peer_socket.recvfrom(1024) #get message from socket
+        #normalize payload (peer message) 
+        message = payload.decode().strip()
+        #tokenize message for parsing using split
+        peer_tokens = message.split()
+        #Check for empty message
+        if not peer_tokens:
+            continue
+
+        #EXTRACT COMMAND
+        peer_command = peer_tokens[0]
+
+        #PEER-PEER COMMAND DECISION TREE
+        if peer_command == "set-id":
+            #SET-ID COMMAND
+
+            #EXTRACT DHT DATA
+            identifier = int(peer_tokens[1])
+            ring_size = int(peer_tokens[2])
+            tuples = peer_tokens[3:]
+            
+            #Determine right neighbor id and index in tuples
+            neighbor_id = (identifier + 1) % ring_size
+            neighbor_index = neighbor_id*3
+
+            #Extract right neighbor data
+            neighbor_name = tuples[neighbor_index]
+            neighbor_ip = tuples[neighbor_index+1]
+            neighbor_pPort = tuples[neighbor_index+2]
+
+            print(neighbor_name)
+            print(neighbor_ip)
+            print(neighbor_pPort)
+
+
+
+
+#PEER
+#   Main Peer Function with stdin command interface
+def Peer():
+    
+    #Variables for PEER
+    PEER_SETUP = False #boolean to track if the peer has been setup
+    #general peer variables
+    peer_name = "" 
+    peer_ip = ""
+    m_port = 0
+    p_port = 0
+    
+    #Command line Input Validation
+    if len(sys.argv) != 3:
+        print("USAGE ERROR: peer.py <MANAGER_IP> <MANAGER_PORT>")
+        sys.exit(1)
+
+    #EXTRACT COMMAND LINE ARGUMENTS
+    MANAGER_IP = sys.argv[1]
+    MANAGER_PORT = sys.argv[2]
+
+    #UDP sockets for peer-peer messages and peer-manager messages
+    peer2Peer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    peer2Manager_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    #STDIN INTERFACE
+    for line in sys.stdin:
+        #Tokenize the command with strip and split
+        tokens = line.strip().split()
+        if not tokens:
+            continue #Skips empty lines with no commands
+
+        #Extract Command
+        command = tokens[0]
+
+        #null variable protection
+        if (not PEER_SETUP) and command != "peer-setup":
+            print("ERROR: Peer not setup yet")
+            continue
+        
+        #COMMAND DECISION TREE
+        if command == "register":
+            #REGISTER COMMAND
+
+            #build message
+            registerMessage = "register " + peer_name + " " + peer_ip + " " + str(m_port) + " " + str(p_port)
+            #send message to manager
+            peer2Manager_socket.sendto(registerMessage.encode(), (MANAGER_IP, MANAGER_PORT))
+            #get response
+            managerResponse, manager_address = peer2Manager_socket.recvfrom(1024)
+            #normalize response with decode and strip
+            response = managerResponse.decode().strip()
+            
+            #OUTCOME
+            if response == "SUCCESS":
+                print("Peer is registered")
+            else:
+                print("Peer registration failed")
+
+        elif command == "setup-dht":
+            #SETUP-DHT COMMAND
+
+            #INPUT VALIDATION
+            #Input: command n YYYY
+            if len(tokens) != 3:
+                print("USAGE ERROR: setup-dht n YYYY")
+                continue
+            
+            #EXTRACT PARAMETERS
+            n = int(tokens[1])
+            year = int(tokens[2])
+
+            #PARAMETER VALIDATION
+            #n must be greater than or equal to 3 and year must be a valid 4 digit integer
+            if n < 3 or year < 1000 or year > 9999:
+                print("USAGE ERROR (Parameters): setup-dht n YYYY (n must be greater than or equal to 3)")
+                continue
+
+            #build message
+            setupMessage = "setup-dht " + peer_name + " " + str(n) + " " + str(year)
+            #send message to manager
+            peer2Manager_socket.sendto(setupMessage.encode(), (MANAGER_IP, MANAGER_PORT))
+            #get response
+            managerResponse, manager_address = peer2Manager_socket.recvfrom(1024)
+            #normalize response with decode and strip
+            response = managerResponse.decode().strip()
+            #Tokenize message for parsing using split
+            response_tokens = response.split()
+
+            #Check for failure
+            if response_tokens[0] == "FAILURE":
+                print("SETUP-DHT FAILED")
+                continue
+
+            #Remove SUCCESS from tuples
+            response_tokens = response_tokens[1:]
+            #rebuld tuples string for set-id message
+            peer_tuples = " ".join(response_tokens)
+
+            #loop to parse response
+            index = 3 #tracks which tuple is being parsed (start after leader)
+            while index < len(response_tokens):
+                #extract tuple information
+                current_name = response_tokens[index]
+                current_ip = response_tokens[index+1]
+                current_pPort = int(response_tokens[index+2])
+
+                #set identifier
+                identifier = index // 3
+
+                #build message
+                set_id_message = "set-id " + str(identifier) + " " + str(n) + " " + peer_tuples
+                #send peer message
+                peer2Peer_socket.sendto(set_id_message.encode(), (current_ip, current_pPort))
+
+                #increment by 3 for next tuple
+                index = index + 3
+
+            #PARSING CSV FILE
+            #Build filename
+            selected_file = "details_" + str(year) + ".csv"
+            #get number of storm events
+            num_of_events = count_storm_events_csv(selected_file)
+            #Loop over all storm events
+            
+
+
+        elif command == "query-dht":
+            #QUERY-DHT COMMAND
+            print("COMMAND NOT SUPPORTED")
+        elif command == "leave-dht":
+            #LEAVE-DHT COMMAND
+            print("COMMAND NOT SUPPORTED")
+        elif command == "join-dht":
+            #JOIN-DHT COMMAND
+            print("COMMAND NOT SUPPORTED")
+        elif command == "dht-rebuilt":
+            #DHT-REBUILT
+            print("COMMAND NOT SUPPORTED")
+        elif command == "deregister":
+            #DEREGISTER COMMAND
+            print("COMMAND NOT SUPPORTED")
+        elif command == "teardown-dht":
+            #TEARDOWN-DHT
+            print("COMMAND NOT SUPPORTED")
+        elif command == "teardown-complete":
+            #TEARDOWN-COMPLETE
+            print("COMMAND NOT SUPPORTED")
+        elif command == "peer-setup":
+            #SETUP PEER COMMAND
+
+            #INPUT VALIDATION
+            if len(tokens) != 5:
+                print("USAGE ERROR: peer-setup ⟨peer-name⟩ ⟨IPv4-address⟩ ⟨m-port⟩ ⟨p-port⟩")
+                continue
+
+            #Duplicate Setup protection
+            if PEER_SETUP:
+                print("ERROR Peer already setup")
+                continue
+            
+            #EXTRACT PEER VARIABLES
+            peer_name = tokens[1]
+            peer_ip = tokens[2]
+            m_port = int(tokens[3])
+            p_port = int(tokens[4])
+
+            #Set up UDP Sockets
+            peer2Manager_socket.bind((peer_ip, m_port))
+            peer2Peer_socket.bind((peer_ip, p_port))
+
+            #Start peer listening thread for peer to peer commands
+            peer_thread = threading.Thread(target=peer2peer_Listener, args=(peer2Peer_socket,))
+            peer_thread.start()
+
+            #UPDATE SETUP FLAG
+            PEER_SETUP = True
+
+            print("Peer is setup")
+
+        else:
+            #UNKNOWN COMMAND
+            print("COMMAND NOT SUPPORTED")
+       
+
+#Call peer function
+if __name__ == "__main__":
+    Peer()
+    
