@@ -3,12 +3,6 @@ import sys
 import threading
 import csv
 
-#MANAGER IP ADDRESS
-#for local testing:
-MANAGER_IP = '127.0.0.1'
-#for lab testing (PC-A defualt IP setup)
-#MANAGER_IP = '10.0.1.11'
-
 #UTILITY FUNCTIONS
 def count_storm_events_csv(filename):
     """
@@ -27,6 +21,68 @@ def count_storm_events_csv(filename):
         for row in csv_reader:
             event_count += 1
     return event_count
+
+def compute_hashes(hash_table_size, ring_size, event_id):
+    """
+    Computes the local table index and the peer ownership for a given event ID.
+    
+    Parameters:
+        hash_table_size (int): The size of the hash table (should be the first prime number larger than 2 * total_events).
+        ring_size (int): The total number of clients/nodes in the DHT ring.
+        event_id (int): The unique identifier for the parsed storm event.
+        
+    Returns:
+        tuple: A tuple containing:
+            - pos (int): The local table index where the event is stored.
+            - client_id (int): The ID of the client that owns this event.
+    """
+    pos = event_id % hash_table_size # local table index
+    client_id = pos % ring_size      # peer ownership
+    return (pos, client_id)
+
+def find_next_prime(total_storm_events):
+    """
+    Finds the first prime number that is strictly greater than 2 * total_storm_events.
+    This value is used to determine the appropriate size for the hash table.
+    
+    Parameters:
+        total_storm_events (int): The total number of events parsed from the CSV.
+        
+    Returns:
+        int: The next prime number greater than 2 * total_storm_events.
+    """
+    current_num = total_storm_events * 2 + 1
+
+    while True:
+        if (is_prime(current_num)):
+            return current_num
+        else:
+            current_num = current_num + 1
+
+def is_prime(num):
+    """
+    Determines whether a given number is a prime number.
+    
+    Parameters:
+        num (int): The number to check for primality.
+        
+    Returns:
+        bool: True if the number is prime, False otherwise.
+    """
+    # base cases, should never happen
+    if num <= 1:
+        return False
+    elif num == 2:
+        return True
+    elif num == 3:
+        return True
+
+    sqr_root_value = int(num ** 0.5)
+    for i in range (3, sqr_root_value + 1, 2):
+        if (num % i == 0):
+            return False
+
+    return True
 
 #Thread to listen for peer to peer messages
 #   - Function takes the peer socket and listens infintely for peer messages
@@ -86,7 +142,16 @@ def Peer():
     peer_ip = ""
     m_port = 0
     p_port = 0
-    MANAGER_PORT = 0 # set during peer setup based on manager port during manager start
+    
+    #Command line Input Validation
+    if len(sys.argv) != 3:
+        print("USAGE ERROR: peer.py <MANAGER_IP> <MANAGER_PORT>")
+        sys.exit(1)
+
+    #EXTRACT COMMAND LINE ARGUMENTS
+    MANAGER_IP = sys.argv[1]
+    MANAGER_PORT = sys.argv[2]
+
     #UDP sockets for peer-peer messages and peer-manager messages
     peer2Peer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     peer2Manager_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -184,11 +249,15 @@ def Peer():
                 #increment by 3 for next tuple
                 index = index + 3
 
+            #PARSING CSV FILE
+            #Build filename
+            selected_file = "details_" + str(year) + ".csv"
+            #get number of storm events
+            num_of_events = count_storm_events_csv(selected_file)
+            #Loop over all storm events
+            
 
 
-        elif command == "dht-complete":
-            #DHT-COMPLETE COMMAND
-            print("COMMAND NOT SUPPORTED")
         elif command == "query-dht":
             #QUERY-DHT COMMAND
             print("COMMAND NOT SUPPORTED")
@@ -214,8 +283,8 @@ def Peer():
             #SETUP PEER COMMAND
 
             #INPUT VALIDATION
-            if len(tokens) != 6:
-                print("USAGE ERROR: peer-setup ⟨peer-name⟩ ⟨IPv4-address⟩ ⟨m-port⟩ ⟨p-port⟩ ⟨MANAGER-PORT⟩")
+            if len(tokens) != 5:
+                print("USAGE ERROR: peer-setup ⟨peer-name⟩ ⟨IPv4-address⟩ ⟨m-port⟩ ⟨p-port⟩")
                 continue
 
             #Duplicate Setup protection
@@ -228,7 +297,6 @@ def Peer():
             peer_ip = tokens[2]
             m_port = int(tokens[3])
             p_port = int(tokens[4])
-            MANAGER_PORT = int(tokens[5])
 
             #Set up UDP Sockets
             peer2Manager_socket.bind((peer_ip, m_port))
