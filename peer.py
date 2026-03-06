@@ -84,17 +84,42 @@ def is_prime(num):
 
     return True
 
+#CUSTOM DATA STRUCTURES
+#   Record stores the 14 fields required as an object for easy parsing and storage as well as the pos and id
+class Record:
+    def __init__(self, pos, owner_id, event_id, state, year, month_name, event_type, cz_type, cz_name, injuries_direct, injuries_indirect, deaths_direct, deaths_indirect, damage_property, damage_crops, tor_f_scale):
+        self.pos = pos
+        self.id = owner_id
+        self.event_id = event_id
+        self.state = state
+        self.year = year
+        self.month_name = month_name
+        self.event_type = event_type
+        self.cz_type = cz_type
+        self.cz_name = cz_name
+        self.injuries_direct = injuries_direct
+        self.injuries_indirect = injuries_indirect
+        self.deaths_direct = deaths_direct
+        self.deaths_indirect = deaths_indirect
+        self.damage_property = damage_property
+        self.damage_crops = damage_crops
+        self.tor_f_scale = tor_f_scale
+
 #Thread to listen for peer to peer messages
 #   - Function takes the peer socket and listens infintely for peer messages
 def peer2peer_Listener(peer2peer_socket):
     #Peer to Peer Variables
     identifier = 0
     ring_size = 0
+    neighbor_ip = ""
+    neighbor_pPort = 0
+
+    peerRecordList = {} #dictionary to store records keyed by eventID
 
     #Infinite loop listening for messages
     while True:
         #READ MESSAGE
-        payload, peer_address = peer2peer_socket.recvfrom(1024) #get message from socket
+        payload, peer_address = peer2peer_socket.recvfrom(4096) #get message from socket
         #normalize payload (peer message) 
         message = payload.decode().strip()
         #tokenize message for parsing using split
@@ -122,13 +147,45 @@ def peer2peer_Listener(peer2peer_socket):
             #Extract right neighbor data
             neighbor_name = tuples[neighbor_index]
             neighbor_ip = tuples[neighbor_index+1]
-            neighbor_pPort = tuples[neighbor_index+2]
+            neighbor_pPort = int(tuples[neighbor_index+2])
 
-            print(neighbor_name)
-            print(neighbor_ip)
-            print(neighbor_pPort)
+        if peer_command == "store":
+            #STORE COMMAND
 
+            #Wait until peer is setup to prevent race condition
+            while not neighbor_ip:
+                continue
 
+            #EXTRACT ID DATA
+            curr_id = int(peer_tokens[2])
+
+            #Check ID does not match to propogate around the ring
+            if curr_id != identifier:
+                peer2peer_socket.sendto(message.encode(), (neighbor_ip, neighbor_pPort))
+                continue
+
+            #If ID matches store in recordList
+            #normalize storm record data
+            records_fields = peer_tokens[3].split(",")
+            #extract values
+            curr_pos = int(peer_tokens[1])
+            curr_event_id = records_fields[0]
+            curr_state = records_fields[1]
+            curr_year = records_fields[2]
+            curr_month_name = records_fields[3]
+            curr_event_type = records_fields[4]
+            curr_cz_type = records_fields[5]
+            curr_cz_name = records_fields[6]
+            curr_injuries_direct = records_fields[7]
+            curr_injuries_indirect = records_fields[8]
+            curr_deaths_direct = records_fields[9]
+            curr_deaths_indirect = records_fields[10]
+            curr_damage_property = records_fields[11]
+            curr_damage_crops = records_fields[12]
+            curr_tor_f_scale = records_fields[13]
+
+            #add record to list
+            peerRecordList[curr_event_id] = Record(curr_pos, curr_id, curr_event_id, curr_state, curr_year, curr_month_name, curr_event_type, curr_cz_type, curr_cz_name, curr_injuries_direct, curr_injuries_indirect, curr_deaths_direct, curr_deaths_indirect, curr_damage_property, curr_damage_crops, curr_tor_f_scale)
 
 
 #PEER
@@ -143,6 +200,15 @@ def Peer():
     m_port = 0
     p_port = 0
     
+    #LEADER ONLY VARIABLES
+    leader_identifier = 0
+    leader_neighbor_name = ""
+    leader_neighbor_IP =""
+    leader_neighbor_port = 0
+    DHT_RING_SIZE = 0
+    leader_recordList = {} #dictionary to store leaders hash table keyed by eventID
+    nodeStorageAmounts = {} # dictionary to store how many records are at each node
+
     #Command line Input Validation
     if len(sys.argv) != 3:
         print("USAGE ERROR: peer.py <MANAGER_IP> <MANAGER_PORT>")
@@ -150,7 +216,7 @@ def Peer():
 
     #EXTRACT COMMAND LINE ARGUMENTS
     MANAGER_IP = sys.argv[1]
-    MANAGER_PORT = sys.argv[2]
+    MANAGER_PORT = int(sys.argv[2])
 
     #UDP sockets for peer-peer messages and peer-manager messages
     peer2Peer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -230,16 +296,32 @@ def Peer():
             #rebuld tuples string for set-id message
             peer_tuples = " ".join(response_tokens)
 
+            #SET LEADER VARIABLES
+            leader_identifier = 0
+            DHT_RING_SIZE = n
+            nodeStorageAmounts[0] = 0
+
             #loop to parse response
-            index = 3 #tracks which tuple is being parsed (start after leader)
+            index = 0 #tracks which tuple is being parsed (start after leader)
             while index < len(response_tokens):
                 #extract tuple information
                 current_name = response_tokens[index]
                 current_ip = response_tokens[index+1]
                 current_pPort = int(response_tokens[index+2])
 
+                #set leader variables first
+                if index == 0:
+                    leader_neighbor_name = current_name
+                    leader_neighbor_IP = current_ip
+                    leader_neighbor_port = current_pPort
+                    index = index + 3
+                    continue
+
                 #set identifier
                 identifier = index // 3
+
+                #initialize node storage amounts
+                nodeStorageAmounts[identifier] = 0
 
                 #build message
                 set_id_message = "set-id " + str(identifier) + " " + str(n) + " " + peer_tuples
@@ -251,12 +333,73 @@ def Peer():
 
             #PARSING CSV FILE
             #Build filename
-            selected_file = "details_" + str(year) + ".csv"
+            selected_file = "Data/details_" + str(year) + ".csv"
             #get number of storm events
             num_of_events = count_storm_events_csv(selected_file)
+            #compute hash table size
+            hash_size = find_next_prime(num_of_events)
             #Loop over all storm events
-            
+            with open(selected_file, newline='') as stormcsv:
+                reader = csv.DictReader(stormcsv)
+                for row in reader:
+                    #extract paramters
+                    curr_event_id = row['EVENT_ID']
+                    curr_state = row['STATE']
+                    curr_year = row['YEAR']
+                    curr_month_name = row['MONTH_NAME']
+                    curr_event_type = row['EVENT_TYPE']
+                    curr_cz_type = row['CZ_TYPE']
+                    curr_cz_name = row['CZ_NAME']
+                    curr_injuries_direct = row['INJURIES_DIRECT']
+                    curr_injuries_indirect = row['INJURIES_INDIRECT']
+                    curr_deaths_direct = row['DEATHS_DIRECT']
+                    curr_deaths_indirect = row['DEATHS_INDIRECT']
+                    curr_damage_property = row['DAMAGE_PROPERTY']
+                    curr_damage_crops = row['DAMAGE_CROPS']
+                    curr_tor_f_scale = row['TOR_F_SCALE']
 
+                    #compute pos and id for event
+                    curr_pos, curr_id = compute_hashes(hash_size, DHT_RING_SIZE, int(curr_event_id))
+
+                    #If event needs to be stored at leader do this first
+                    if curr_id == 0:
+                        #add record to leaders list
+                        leader_recordList[curr_event_id] = Record(curr_pos, curr_id, curr_event_id, curr_state, curr_year, curr_month_name, curr_event_type, curr_cz_type, curr_cz_name, curr_injuries_direct, curr_injuries_indirect, curr_deaths_direct, curr_deaths_indirect, curr_damage_property, curr_damage_crops, curr_tor_f_scale)
+                        nodeStorageAmounts[0] = nodeStorageAmounts[0] + 1
+                        continue #skip to next entry
+
+                    #build message for store command
+                    stormRecordData = ",".join([curr_event_id, curr_state, curr_year, curr_month_name, curr_event_type, curr_cz_type, curr_cz_name, curr_injuries_direct, curr_injuries_indirect, curr_deaths_direct, curr_deaths_indirect, curr_damage_property, curr_damage_crops, curr_tor_f_scale])
+                    storeCommand = "store " + str(curr_pos) + " " + str(curr_id) + " " + stormRecordData
+
+                    #send store command around DHT Ring
+                    peer2Peer_socket.sendto(storeCommand.encode(), (leader_neighbor_IP, leader_neighbor_port))
+
+                    #increment node storage amount for identifier
+                    nodeStorageAmounts[curr_id] = nodeStorageAmounts[curr_id] + 1
+
+            #AFTER Print DHT status
+            print("Records Distributed:")
+            for key, value in nodeStorageAmounts.items():
+                print(f"Node: {key}, Records Stored: {value}")
+
+            #Send DHT-Complete Message to Manager
+            #build message
+            completeMessage = "dht-complete " + peer_name 
+            #send message to manager
+            peer2Manager_socket.sendto(completeMessage.encode(), (MANAGER_IP, MANAGER_PORT))
+            #get response
+            managerResponse_complete, manager_address = peer2Manager_socket.recvfrom(1024)
+            #normalize response with decode and strip
+            complete_response = managerResponse_complete.decode().strip()
+            #Tokenize message for parsing using split
+            complete_response_tokens = complete_response.split()
+
+            #Check for failure
+            if complete_response_tokens[0] == "FAILURE":
+                print("SETUP-DHT FAILED")
+            else:
+                print("DHT-COMPLETED")
 
         elif command == "query-dht":
             #QUERY-DHT COMMAND

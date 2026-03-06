@@ -61,9 +61,9 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 
 - [x] Parse `setup-dht <peer-name> <n> <YYYY>`
 - [x] Validate: peer registered, n ≥ 3, enough Free peers, no existing DHT
-- [ ] Set leader state → `Leader`; pick n−1 random Free peers → `InDHT`
-- [ ] Respond with `SUCCESS` + list of n 3-tuples (leader first)
-- [ ] Enter a **blocking state**: reject all messages except `dht-complete`
+- [x] Set leader state → `Leader`; pick n−1 random Free peers → `InDHT`
+- [x] Respond with `SUCCESS` + list of n 3-tuples (leader first)
+- [x] Enter a **blocking state**: reject all messages except `dht-complete`
 
 ---
 
@@ -84,17 +84,17 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 | **Sockets** | One UDP socket bound to `m-port` (manager communication), one bound to `p-port` (peer-to-peer) |
 | **Command loop** | Read stdin → construct message → send/receive |
 
-- [ ] Implement peer main loop with stdin command parsing
-- [ ] Create and bind the two UDP sockets (`m-port`, `p-port`)
-- [ ] Add logic to handle/route incoming P2P messages on `p-port`
+- [x] Implement peer main loop with stdin command parsing
+- [x] Create and bind the two UDP sockets (`m-port`, `p-port`)
+- [x] Add logic to handle/route incoming P2P messages on `p-port`
 
 ---
 
 ### Task M6 — Peer: `register` Command (client side)
 
-- [ ] User types `register <name> <ipv4> <m-port> <p-port>`
-- [ ] Send message to manager, wait for response
-- [ ] Print `SUCCESS` / `FAILURE`
+- [x] User types `register <name> <ipv4> <m-port> <p-port>`
+- [x] Send message to manager, wait for response
+- [x] Print `SUCCESS` / `FAILURE`
 
 ---
 
@@ -103,26 +103,26 @@ A step-by-step breakdown for building the DHT socket programming project. Tasks 
 This is the largest single task. Break it into sub-steps:
 
 #### M7a — Send `setup-dht` to Manager & Parse Response
-- [ ] Send `setup-dht <name> <n> <YYYY>` to manager
-- [ ] On `SUCCESS`, parse the n 3-tuples
-- [ ] Store ring info (peer names, IPs, p-ports) indexed by identifier
+- [x] Send `setup-dht <name> <n> <YYYY>` to manager
+- [x] On `SUCCESS`, parse the n 3-tuples
+- [x] Store ring info (peer names, IPs, p-ports) indexed by identifier
 
 #### M7b — Assign Identifiers (`set-id`)
-- [ ] Leader assigns itself id = 0
-- [ ] For i = 1 … n−1: send `set-id` to peer_i with id `i`, ring size `n`, and the full tuple list
-- [ ] Each peer receiving `set-id`: store its id, ring size, and right-neighbour 3-tuple `(i+1) mod n`
+- [x] Leader assigns itself id = 0
+- [x] For i = 1 … n−1: send `set-id` to peer_i with id `i`, ring size `n`, and the full tuple list
+- [x] Each peer receiving `set-id`: store its id, ring size, and right-neighbour 3-tuple `(i+1) mod n`
 
 #### M7c — Build Local Hash Tables (`store`)
-- [ ] Leader reads `details-YYYY.csv`, counts ℓ lines (minus header)
-- [ ] Compute hash table size `s` = first prime > 2 × ℓ
-- [ ] For each record: compute `pos = event_id % s`, `id = pos % n`
+- [x] Leader reads `details-YYYY.csv`, counts ℓ lines (minus header)
+- [x] Compute hash table size `s` = first prime > 2 × ℓ
+- [x] For each record: compute `pos = event_id % s`, `id = pos % n`
   - If `id == 0` (leader): store locally
   - Else: send `store` command to **right neighbour** (not directly to target); each peer forwards along the ring until it reaches the correct `id`
-- [ ] Each peer: on receiving `store`, check if target id matches own id → store, else forward to right neighbour
+- [x] Each peer: on receiving `store`, check if target id matches own id → store, else forward to right neighbour
 
 #### M7d — Signal Completion
-- [ ] Leader prints record counts per node
-- [ ] Leader sends `dht-complete` to manager
+- [x] Leader prints record counts per node
+- [x] Leader sends `dht-complete` to manager
 
 ---
 

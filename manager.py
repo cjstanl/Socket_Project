@@ -26,9 +26,6 @@ class Peer:
         self.state = state
 
 
-#Utility Functions
-
-
 #MANGER
 #   Main Manager Function that implements the always on manager 
 def Manager():
