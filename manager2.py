@@ -64,6 +64,11 @@ def Manager():
         #Extract command from message
         command = tokens[0]
 
+        #Check if DHT is being setup (block all except complete command)
+        if DHT_SETUP_IN_PROGRESS and command != "dht-complete":
+            manager_socket.sendto(b'FAILURE', peer_address)
+            continue
+
         #COMMAND DECISION TREE
         if command == "register":
             #REGISTER COMMAND
@@ -110,8 +115,54 @@ def Manager():
 
             #EXTRACT PARAMETERS
             peer_name = tokens[1]
-            n = tokens[2]
-            year = tokens[3]
+            n = int(tokens[2])
+            year = int(tokens[3])
+
+            #PARAMETER VALIDATION
+            #peer must be registered
+            if not peer_name in peer_list:
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+            #n must be > 3 and there needs to be at least n users registered
+            if n < 3 or n > len(peer_list):
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+            #DHT CHECK: there can be only one DHT at a time
+            if DHT_EXISTS:
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+
+            #SETUP-DHT PROTOCOL
+            DHT_SETUP_IN_PROGRESS = True # Update setup flag to prevent other commands
+            #update peer status to leader
+            peer_list[peer_name].state = "Leader"
+            peer_returns = [] #list of selected peers
+            peer_returns.append(peer_list[peer_name])
+            #select n-1 random n-1 free users to place in DHT
+            count = 0 #tracks number of users selected
+            while count < (n-1):
+                random_name, random_peer = random.choice(list(peer_list.items()))
+                #ensure leader is not chosen
+                if random_name == peer_name:
+                    continue
+                #ensure peer is free
+                if random_peer.state != "Free":
+                    continue
+                #Update peer state
+                peer_list[random_name].state = "InDHT"
+                #add peer to list for return message
+                peer_returns.append(peer_list[random_name])
+                #increment count
+                count = count + 1
+
+            #Create return message
+            returnMessage = "SUCCESS"
+            #loop over selected peers for return message
+            for peer in peer_returns:
+                returnMessage = returnMessage + " " + peer.name + " " + peer.ip + " " + str(peer.p_port)
+            
+            #Send response
+            manager_socket.sendto(returnMessage.encode(), peer_address)
 
         elif command == "dht-complete":
             #DHT-COMPLETE COMMAND
