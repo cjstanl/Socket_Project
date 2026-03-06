@@ -8,6 +8,27 @@ MANAGER_IP = '127.0.0.1'
 #for lab testing (PC-A defualt IP setup)
 #MANAGER_IP = '10.0.1.11'
 
+#CUSTOM DATA STRUCTURES
+#Peer
+#   Structure to hold peers data for ease of access, a peer has the following attributes:
+#       - name: <15 character alphabetic string
+#       - ip: IPv4 Address associated with the peer
+#       - m_port: port for manager to peer communication
+#       - p_port: port for peer to peer communication
+#       - state: state of the peer (Free, Leader, InDHT)
+class Peer:
+    #Constructor
+    def __init__(self, name, ip, m_port, p_port, state):
+        self.name = name
+        self.ip = ip
+        self.m_port = m_port
+        self.p_port = p_port
+        self.state = state
+
+
+#Utility Functions
+
+
 #MANGER
 #   Main Manager Function that implements the always on manager 
 def Manager():
@@ -23,7 +44,14 @@ def Manager():
 
     #Create UDP Socket for manager
     manager_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    manager_socket.bind()
+    manager_socket.bind((MANAGER_IP, MANAGER_PORT))
+
+    #INITIAL VARIABLES
+    peer_list = {} #Peer dictionary
+    m_ports = set() #track used m_ports
+    p_ports = set() #track used p_ports
+    DHT_EXISTS = False #boolean to track if DHT exists
+    DHT_SETUP_IN_PROGRESS = False #boolean to track if DHT is being setup
 
     #Infinite Loop for reading messages
     while True:
@@ -48,8 +76,29 @@ def Manager():
             #EXTRACT PARAMETERS
             peer_name = tokens[1]
             ip_address = tokens[2]
-            m_port = tokens[3]
-            p_port = tokens[4]
+            m_port = int(tokens[3])
+            p_port = int(tokens[4])
+
+            #VALIDATE PARAMETERS
+            #Name parameter must be alphabetic, less than 15 characters, and unique
+            if (not peer_name.isalpha()) or len(peer_name) > 15:
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+            elif peer_name in peer_list:
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+            #Port numbers need to be unique
+            if (m_port in m_ports) or (p_port in p_ports):
+                manager_socket.sendto(b'FAILURE', peer_address)
+                continue
+
+            #REGISTER PEER
+            #create new peer object
+            peer_list[peer_name] = Peer(peer_name, ip_address, m_port, p_port, "Free")
+            #add parameters to list for future parameter validation
+            m_ports.add(m_port)
+            p_ports.add(p_port)
+            manager_socket.sendto(b'SUCCESS', peer_address)
 
         elif command == "setup-dht":
             #SETUP-DHT COMMAND
