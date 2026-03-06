@@ -47,6 +47,17 @@ def temp_dht_simulator():
     print(f'Next Prime: {next_prime}')
 
 
+def construct_local_dht(packet):
+    node_id = get_node_id(packet)
+
+    if self.node_id == node_id:
+        store data locally
+
+    else:
+        neighbor_id = get_neighbor_id()
+        send_to_neighbor(packet, neighbor_id)
+
+
 
 def count_storm_events_csv(filename):
     """
