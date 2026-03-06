@@ -65,7 +65,7 @@ def Manager():
         if not tokens:
             manager_socket.sendto(b'FAILURE', peer_address)
             continue
-        
+
         #Extract command from message
         command = tokens[0]
 
@@ -128,7 +128,7 @@ def Manager():
             if not peer_name in peer_list:
                 manager_socket.sendto(b'FAILURE', peer_address)
                 continue
-            #n must be > 3 and there needs to be at least n users registered
+            #n must be >= 3 and there needs to be at least n users registered
             if n < 3 or n > len(peer_list):
                 manager_socket.sendto(b'FAILURE', peer_address)
                 continue
