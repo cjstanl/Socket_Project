@@ -8,6 +8,13 @@ DHT_EXISTS = False
 DHT_SETUP_IN_PROGRESS = False
 
 #DATA STRUCTURES
+#Peer
+#   Peer data structure holds all relevant data for each peer in the DHT
+#       - Name: name of the peer must be less than 15 characters (only alphabetic)
+#       - ip: IPv4 address of the peer
+#       - m_port: port for communication with the manager
+#       - p_port: port for communication between peers
+#       - state: Peer state (Free, Leader, or InDHT)
 class Peer:
     def __init__(self, name, ip, m_port, p_port, state):
         self.name = name
@@ -15,7 +22,8 @@ class Peer:
         self.m_port = m_port
         self.p_port = p_port
         self.state = state
-
+#PeerList
+#   PeerList tracks the list of peers, 
 class PeerList:
     def __init__(self):
         self.peers = {}
