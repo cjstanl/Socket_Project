@@ -40,9 +40,21 @@ def Peer():
         if command == "register":
             #REGISTER COMMAND
 
+            #build message
+            registerMessage = "register " + peer_name + " " + peer_ip + " " + str(m_port) + " " + str(p_port)
+            #send message to manager
+            peer2Manager_socket.sendto(registerMessage.encode(), (MANAGER_IP, MANAGER_PORT))
+            #get response
+            managerResponse, manager_address = peer2Manager_socket.recvfrom(1024)
+            #normalize response with decode and strip
+            response = managerResponse.decode().strip()
             
+            #OUTCOME
+            if response == "SUCCESS":
+                print("Peer is registered")
+            else:
+                print("Peer registration failed")
 
-            print("COMMAND NOT SUPPORTED")
         elif command == "setup-dht":
             #SETUP-DHT COMMAND
             print("COMMAND NOT SUPPORTED")
@@ -96,6 +108,8 @@ def Peer():
 
             #UPDATE SETUP FLAG
             PEER_SETUP = True
+
+            print("Peer is setup")
 
         else:
             #UNKNOWN COMMAND
