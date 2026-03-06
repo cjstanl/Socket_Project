@@ -14,7 +14,7 @@ filename = 'Stormdata_1950.csv'
 # Initialize a UDP socket for the client
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # Bind the client to the specified host and port
-client_socket.bind((HOST, CLIENT_PORT))
+client_socket.bind((HOST, CLIENT_PORT)) 
 
 # Send an initial message to the server
 message = "Hello from UDP client!"
