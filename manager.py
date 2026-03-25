@@ -18,6 +18,8 @@ m_ports = set() #track used m_ports
 p_ports = set() #track used p_ports
 DHT_EXISTS = False #boolean to track if DHT exists
 DHT_SETUP_IN_PROGRESS = False #boolean to track if DHT is being setup
+DHT_REBUILD_IN_PROGRESS = False #tracks if leave/join rebuild is in progress
+DHT_TEARDOWN_IN_PROGRESS = False #tracks if teardown is in progress
 DHT_REBUILD_PEER = None # tracks which peer initiated the leave/join command
 
 #CUSTOM DATA STRUCTURES
@@ -219,9 +221,9 @@ def leave_dht(manager_socket, peer_address, body):
 	
 	#UPDATE DHT STATUS
 	global DHT_EXISTS
-	global DHT_SETUP_IN_PROGRESS
+	global DHT_REBUILD_IN_PROGRESS
 	DHT_EXISTS = False
-	DHT_SETUP_IN_PROGRESS = True
+	DHT_REBUILD_IN_PROGRESS = True
 	#record which peer initiated leave command
 	global DHT_REBUILD_PEER
 	DHT_REBUILD_PEER = peer_name
@@ -249,18 +251,154 @@ def join_dht(manager_socket, peer_address, body):
 	
 	#UPDATE DHT STATUS
 	global DHT_EXISTS
-	global DHT_SETUP_IN_PROGRESS
+	global DHT_REBUILD_IN_PROGRESS
 	DHT_EXISTS = False
-	DHT_SETUP_IN_PROGRESS = True
+	DHT_REBUILD_IN_PROGRESS = True
 	#record which peer initiated join command
 	global DHT_REBUILD_PEER
 	DHT_REBUILD_PEER = peer_name
 	#send success message
 	send_message(manager_socket, peer_address, "SUCCESS")
 
+#DHT-REBUILT COMMAND
+#
+def dht_rebuilt(manager_socket, peer_address, body):
+	#tokenize body for easier parsing
+	tokens = body.split()
+
+	#INPUT VALIDATION
+	if len(tokens) != 2:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	
+	#EXTRACT PARAMETERS
+	peer_name = tokens[0]
+	new_leader = tokens[1]
+
+	#VALIDATE PARAMETERS
+	#check if peer initiated leave/join command
+	if peer_name != DHT_REBUILD_PEER:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is registered
+	if peer_name not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if new leader is registered
+	if new_leader not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	
+	#UPDATE PEER STATES
+	#set peer state according to current status
+	if peer_list[peer_name].state == "Free":
+		#JOIN COMMAND ISSUED
+		peer_list[peer_name].state = "InDHT"
+	else:
+		#LEAVE COMMAND ISSUED
+		peer_list[peer_name].state = "Free"
+	#Remove old leader if not the same
+	for peer in peer_list.values():
+		if peer.state == "Leader" and peer.name != new_leader:
+			peer.state = "InDHT"
+	#set new leaders state
+	peer_list[new_leader].state = "Leader"
+	
+	#UPDATE DHT STATUS
+	#UPDATE DHT STATUS
+	global DHT_EXISTS
+	global DHT_REBUILD_IN_PROGRESS
+	global DHT_REBUILD_PEER
+	DHT_EXISTS = True
+	DHT_REBUILD_IN_PROGRESS = False
+	DHT_REBUILD_PEER = None
+	#send response
+	send_message(manager_socket, peer_address, "SUCCESS")
+
+#DEREGISTER COMMAND
+#
+def deregister(manager_socket, peer_address, body):
+	#EXTRACT PARAMETER
+	peer_name = body.strip()
+
+	#VALIDATE PARAMETER
+	#check if peer is registered
+	if peer_name not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is Free
+	if peer_list[peer_name].state != "Free":
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	
+	#REMOVE PEER FROM REGISTERED LISTS
+	#remove ports from in use ports
+	m_ports.discard(peer_list[peer_name].m_port)
+	p_ports.discard(peer_list[peer_name].p_port)
+	#delete peer from peer_list dictionary
+	del peer_list[peer_name]
+	#send response
+	send_message(manager_socket, peer_address, "SUCCESS")
+
+#TEARDOWN-DHT COMMAND
+#
+def teardown_dht(manager_socket, peer_address, body):
+	#EXTRACT PARAMETER
+	peer_name = body.strip()
+
+	#VALIDATE PARAMETER and CONDITIONS
+	#check if DHT exists
+	if not DHT_EXISTS:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is registered
+	if peer_name not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is the leader
+	if peer_list[peer_name].state != "Leader":
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	
+	#UPDATE DHT STATUS
+	global DHT_EXISTS
+	global DHT_TEARDOWN_IN_PROGRESS
+	DHT_EXISTS = False
+	DHT_TEARDOWN_IN_PROGRESS = True 
+	#send response
+	send_message(manager_socket, peer_address, "SUCCESS")
+
+#TEARDOWN-COMPLETE COMMAND
+#
+def teardown_complete(manager_socket, peer_address, body):
+	#EXTRACT PARAMETER
+	peer_name = body.strip()
+
+	#VALIDATE PARAMETER
+	#check if peer is registered
+	if peer_name not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is the leader
+	if peer_list[peer_name].state != "Leader":
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	
+	#RESET PEER STATES
+	for peer in peer_list.values():
+		if peer.state != "Free":
+			peer.state = "Free"
+	
+	#UPDATE DHT STATUS
+	global DHT_EXISTS
+	global DHT_TEARDOWN_IN_PROGRESS
+	DHT_EXISTS = False
+	DHT_TEARDOWN_IN_PROGRESS = False
+	#send response
+	send_message(manager_socket, peer_address, "SUCCESS")
 
 #MANGER
-#   Main Manager Function that implements the always on manager 
+#   Main Manager Function that implements the always on manager server 
 def Manager():
     
     #COMMAND LINE INPUT VALIDATION: Manager command line port
@@ -287,8 +425,16 @@ def Manager():
 		#Extract command from message
 		command = header
 
-        #Check if DHT is being setup (block all except complete command)
-		if DHT_SETUP_IN_PROGRESS and command != "dht-complete" and command != "dht-rebuilt":
+        #Check if DHT is being setup, rebuilt, or torn down (block all except complete command)
+		if DHT_SETUP_IN_PROGRESS and command != "dht-complete":
+			send_message(manager_socket, peer_address, "FAILURE")
+			continue
+		#check if DHT is being rebuilt (block all except rebuilt command)
+		if DHT_REBUILD_IN_PROGRESS and command != "dht-rebuilt":
+			send_message(manager_socket, peer_address, "FAILURE")
+			continue
+		#check if DHT is being torn down (block all excpet complete command)
+		if DHT_TEARDOWN_IN_PROGRESS and command != "teardown-complete":
 			send_message(manager_socket, peer_address, "FAILURE")
 			continue
 
@@ -319,48 +465,19 @@ def Manager():
             
 		elif command == "dht-rebuilt":
             #DHT-REBUILT
-
-            #INPUT VALIDATION
-			if len(tokens) != 3:
-				manager_socket.sendto(b'FAILURE', peer_address)
-				continue
-
-            #EXTRACT PARAMETERS
-			peer_name = tokens[1]
-			new_leader = tokens[2]
+			dht_rebuilt(manager_socket, peer_address, body)
 
 		elif command == "deregister":
             #DEREGISTER COMMAND
-
-            #INPUT VALIDATION
-			if len(tokens) != 2:
-				manager_socket.sendto(b'FAILURE', peer_address)
-				continue
-
-            #EXTRACT PARAMETERS
-			peer_name = tokens[1]
+			deregister(manager_socket, peer_address, body)
             
 		elif command == "teardown-dht":
             #TEARDOWN-DHT
-
-            #INPUT VALIDATION
-			if len(tokens) != 2:
-				manager_socket.sendto(b'FAILURE', peer_address)
-				continue
-
-            #EXTRACT PARAMETERS
-			peer_name = tokens[1]
+			teardown_dht(manager_socket, peer_address, body)
             
 		elif command == "teardown-complete":
             #TEARDOWN-COMPLETE
-
-            #INPUT VALIDATION
-			if len(tokens) != 2:
-				manager_socket.sendto(b'FAILURE', peer_address)
-				continue
-
-            #EXTRACT PARAMETERS
-			peer_name = tokens[1]
+			teardown_complete(manager_socket, peer_address, body)
             
 		else:
             #UNKNOWN COMMAND
