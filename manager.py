@@ -18,6 +18,7 @@ m_ports = set() #track used m_ports
 p_ports = set() #track used p_ports
 DHT_EXISTS = False #boolean to track if DHT exists
 DHT_SETUP_IN_PROGRESS = False #boolean to track if DHT is being setup
+DHT_REBUILD_PEER = None # tracks which peer initiated the leave/join command
 
 #CUSTOM DATA STRUCTURES
 #Peer
@@ -169,6 +170,95 @@ def dht_complete(manager_socket, peer_address, body):
 	#Send success message to leader
 	send_message(manager_socket, peer_address, "SUCCESS")
 	
+#QUERY-DHT COMMAND
+#
+def query_dht(manager_socket, peer_address, body):
+	#VALIDATE DHT CONDITION
+	if not DHT_EXISTS:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#Check if peer is registered
+	peer_name = body.strip()
+	if peer_name not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is free
+	if peer_list[peer_name].state != "Free":
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#choose random peer
+	PEER_SELECTED = False
+	while not PEER_SELECTED:
+		random_name, random_peer = random.choice(list(peer_list.items()))
+		if random_peer.state != "InDHT" and random_peer.state != "Leader":
+			continue
+		PEER_SELECTED = True
+
+	#Build return message
+	query_body = {"name": random_name, "ip": random_peer.ip, "p_port": random_peer.p_port}
+	#send response message
+	send_message(manager_socket, peer_address, "SUCCESS", query_body)
+	
+#LEAVE-DHT COMMAND
+#
+def leave_dht(manager_socket, peer_address, body):
+	#EXTRACT PARAMETERS
+	peer_name = body.strip()
+	#VALIDATE DHT STATUS
+	if not DHT_EXISTS:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#Check if peer is registered
+	if peer_name not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#Check if peer is a DHT maintainer
+	if peer_list[peer_name].state == "Free":
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	
+	#UPDATE DHT STATUS
+	global DHT_EXISTS
+	global DHT_SETUP_IN_PROGRESS
+	DHT_EXISTS = False
+	DHT_SETUP_IN_PROGRESS = True
+	#record which peer initiated leave command
+	global DHT_REBUILD_PEER
+	DHT_REBUILD_PEER = peer_name
+	#send success message
+	send_message(manager_socket, peer_address, "SUCCESS")
+
+#JOIN-DHT COMMAND
+#
+def join_dht(manager_socket, peer_address, body):
+	#EXTRACT PARAMETER
+	peer_name = body.strip()
+
+	#VALIDATE DHT STATUS
+	if not DHT_EXISTS:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is registered
+	if peer_name not in peer_list:
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	#check if peer is free
+	if peer_list[peer_name].state != "Free":
+		send_message(manager_socket, peer_address, "FAILURE")
+		return
+	
+	#UPDATE DHT STATUS
+	global DHT_EXISTS
+	global DHT_SETUP_IN_PROGRESS
+	DHT_EXISTS = False
+	DHT_SETUP_IN_PROGRESS = True
+	#record which peer initiated join command
+	global DHT_REBUILD_PEER
+	DHT_REBUILD_PEER = peer_name
+	#send success message
+	send_message(manager_socket, peer_address, "SUCCESS")
+
+
 #MANGER
 #   Main Manager Function that implements the always on manager 
 def Manager():
@@ -198,7 +288,7 @@ def Manager():
 		command = header
 
         #Check if DHT is being setup (block all except complete command)
-		if DHT_SETUP_IN_PROGRESS and command != "dht-complete":
+		if DHT_SETUP_IN_PROGRESS and command != "dht-complete" and command != "dht-rebuilt":
 			send_message(manager_socket, peer_address, "FAILURE")
 			continue
 
@@ -217,36 +307,15 @@ def Manager():
 
 		elif command == "query-dht":
             #QUERY-DHT COMMAND
-
-            #INPUT VALIDATION
-			if len(tokens) != 2:
-				manager_socket.sendto(b'FAILURE', peer_address)
-				continue
-
-            #EXTRACT PARAMETERS
-			peer_name = tokens[1]
+			query_dht(manager_socket, peer_address, body)
 
 		elif command == "leave-dht":
             #LEAVE-DHT COMMAND
-
-            #INPUT VALIDATION
-			if len(tokens) != 2:
-				manager_socket.sendto(b'FAILURE', peer_address)
-				continue
-
-            #EXTRACT PARAMETERS
-			peer_name = tokens[1]
+			leave_dht(manager_socket, peer_address, body)
             
 		elif command == "join-dht":
             #JOIN-DHT COMMAND
-
-            #INPUT VALIDATION
-			if len(tokens) != 2:
-				manager_socket.sendto(b'FAILURE', peer_address)
-				continue
-
-            #EXTRACT PARAMETERS
-			peer_name = tokens[1]
+			join_dht(manager_socket, peer_address, body)
             
 		elif command == "dht-rebuilt":
             #DHT-REBUILT
