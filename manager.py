@@ -204,6 +204,10 @@ def query_dht(manager_socket, peer_address, body):
 #LEAVE-DHT COMMAND
 #
 def leave_dht(manager_socket, peer_address, body):
+	#import global variables
+	global DHT_EXISTS
+	global DHT_REBUILD_IN_PROGRESS
+	global DHT_REBUILD_PEER
 	#EXTRACT PARAMETERS
 	peer_name = body.strip()
 	#VALIDATE DHT STATUS
@@ -220,12 +224,9 @@ def leave_dht(manager_socket, peer_address, body):
 		return
 	
 	#UPDATE DHT STATUS
-	global DHT_EXISTS
-	global DHT_REBUILD_IN_PROGRESS
 	DHT_EXISTS = False
 	DHT_REBUILD_IN_PROGRESS = True
 	#record which peer initiated leave command
-	global DHT_REBUILD_PEER
 	DHT_REBUILD_PEER = peer_name
 	#send success message
 	send_message(manager_socket, peer_address, "SUCCESS")
@@ -233,6 +234,10 @@ def leave_dht(manager_socket, peer_address, body):
 #JOIN-DHT COMMAND
 #
 def join_dht(manager_socket, peer_address, body):
+	#import global variables
+	global DHT_EXISTS
+	global DHT_REBUILD_IN_PROGRESS
+	global DHT_REBUILD_PEER
 	#EXTRACT PARAMETER
 	peer_name = body.strip()
 
@@ -250,12 +255,9 @@ def join_dht(manager_socket, peer_address, body):
 		return
 	
 	#UPDATE DHT STATUS
-	global DHT_EXISTS
-	global DHT_REBUILD_IN_PROGRESS
 	DHT_EXISTS = False
 	DHT_REBUILD_IN_PROGRESS = True
 	#record which peer initiated join command
-	global DHT_REBUILD_PEER
 	DHT_REBUILD_PEER = peer_name
 	#send success message
 	send_message(manager_socket, peer_address, "SUCCESS")
@@ -263,6 +265,10 @@ def join_dht(manager_socket, peer_address, body):
 #DHT-REBUILT COMMAND
 #
 def dht_rebuilt(manager_socket, peer_address, body):
+	#import global variables
+	global DHT_EXISTS
+	global DHT_REBUILD_IN_PROGRESS
+	global DHT_REBUILD_PEER
 	#tokenize body for easier parsing
 	tokens = body.split()
 
@@ -305,10 +311,6 @@ def dht_rebuilt(manager_socket, peer_address, body):
 	peer_list[new_leader].state = "Leader"
 	
 	#UPDATE DHT STATUS
-	#UPDATE DHT STATUS
-	global DHT_EXISTS
-	global DHT_REBUILD_IN_PROGRESS
-	global DHT_REBUILD_PEER
 	DHT_EXISTS = True
 	DHT_REBUILD_IN_PROGRESS = False
 	DHT_REBUILD_PEER = None
@@ -343,6 +345,9 @@ def deregister(manager_socket, peer_address, body):
 #TEARDOWN-DHT COMMAND
 #
 def teardown_dht(manager_socket, peer_address, body):
+	#import global variables
+	global DHT_EXISTS
+	global DHT_TEARDOWN_IN_PROGRESS
 	#EXTRACT PARAMETER
 	peer_name = body.strip()
 
@@ -361,8 +366,6 @@ def teardown_dht(manager_socket, peer_address, body):
 		return
 	
 	#UPDATE DHT STATUS
-	global DHT_EXISTS
-	global DHT_TEARDOWN_IN_PROGRESS
 	DHT_EXISTS = False
 	DHT_TEARDOWN_IN_PROGRESS = True 
 	#send response

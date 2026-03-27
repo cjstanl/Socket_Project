@@ -88,6 +88,25 @@ def peer2peer_Listener(peer2peer_socket):
 
             #If ID matches store in recordList
             peerRecordList[record["EVENT_ID"]] = Record(curr_pos, curr_id, record["EVENT_ID"], record["STATE"], record["YEAR"], record["MONTH"], record["EVENT_TYPE"], record["CZ_TYPE"], record["CZ_NAME"], record["INJURIES_DIRECT"], record["INJURIES_INDIRECT"], record["DEATHS_DIRECT"], record["DEATHS_INDIRECT"], record["DAMAGE_PROPERTY"], record["DAMAGE_CROPS"], record["TOR_F_SCALE"])
+        
+        elif peer_command == "find-event":
+            #FIND EVENT COMMAND
+            
+            #EXTRACT PARAMETERS
+            event_id = body["event_id"]
+            curr_hash_size = body["hash_size"]
+            curr_ring_size = body["ring_size"]
+            curr_peer_list = body["peer_list"]
+            S_ip = body["S_ip"]
+            S_p_port = body["S_port"]
+            id_seq = body["id_seq"]
+            unvisited = body["unvisited_nodes"]
+
+            #COMPUTE POS AND ID FOR EVENT
+            curr_pos, curr_id = compute_hashes(curr_hash_size, curr_ring_size, int(event_id))
+
+            #update id_seq and unvisited_nodes
+            id_seq.append(identifier)
 
 
 #PEER CLI COMMANDS
@@ -169,15 +188,11 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
     #extract peer list and dht size from response
     peers = body["peers"]
     DHT_RING_SIZE = body["dht_size"]
-    #Set leader information
-    leader_identifier = 0 #leader is always node 0
+    #Initialize list to track storage amounts 
     nodeStorageAmounts = {} #dictionary to store how many records are at each node
-    nodeStorageAmounts[0] = 0 #initialize node count for leader to 0
-    leader_neighbor_name = peers[1]["name"]
-    leader_neighbor_IP = peers[1]["ip"]
-    leader_neighbor_port = peers[1]["p_port"]
+
     #loop over remainder of peers starting at index 1 to exclude leader
-    for i in range(1, len(peers)):
+    for i in range(0, len(peers)):
         peer = peers[i] #get current peer
         nodeStorageAmounts[i] = 0 #initialize node count to 0
         #build message for peer to peer id and neighbor assignments
@@ -192,7 +207,6 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
     num_of_events = count_storm_events_csv(selected_file)
     #compute hash table size
     hash_size = find_next_prime(num_of_events)
-    leader_recordList = {}
 
     #Loop over all storm events
     with open(selected_file, newline='') as stormcsv:
@@ -216,18 +230,11 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
 
             #compute pos and id for event
             curr_pos, curr_id = compute_hashes(hash_size, DHT_RING_SIZE, int(curr_event_id))
-
-            #If event needs to be stored at leader do this first
-            if curr_id == 0:
-                #add record to leaders list
-                leader_recordList[curr_event_id] = Record(curr_pos, curr_id, curr_event_id, curr_state, curr_year, curr_month_name, curr_event_type, curr_cz_type, curr_cz_name, curr_injuries_direct, curr_injuries_indirect, curr_deaths_direct, curr_deaths_indirect, curr_damage_property, curr_damage_crops, curr_tor_f_scale)
-                nodeStorageAmounts[0] = nodeStorageAmounts[0] + 1
-                continue #skip to next entry
             
             #build message for store command
             store_command_body = {"pos": curr_pos, "destination_id": curr_id, "record": {"EVENT_ID": curr_event_id,"STATE": curr_state,"YEAR": curr_year,"MONTH": curr_month_name,"EVENT_TYPE": curr_event_type,"CZ_TYPE": curr_cz_type,"CZ_NAME": curr_cz_name,"INJURIES_DIRECT": curr_injuries_direct,"INJURIES_INDIRECT": curr_injuries_indirect,"DEATHS_DIRECT": curr_deaths_direct,"DEATHS_INDIRECT": curr_deaths_indirect,"DAMAGE_PROPERTY": curr_damage_property,"DAMAGE_CROPS": curr_damage_crops,"TOR_F_SCALE": curr_tor_f_scale}}
             #send store command around DHT Ring
-            send_message(peer2Peer_socket, (leader_neighbor_IP, leader_neighbor_port), "store", store_command_body)
+            send_message(peer2Peer_socket, (peers[0]["ip"], peers[0]["p_port"]), "store", store_command_body)
             #increment node storage amount for identifier
             nodeStorageAmounts[curr_id] = nodeStorageAmounts[curr_id] + 1
 
@@ -248,7 +255,7 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
         return
     print("DHT SETUP COMPLETE")
     #Return leader variables to main loop
-    return leader_neighbor_IP, leader_neighbor_port, nodeStorageAmounts, leader_recordList
+    return nodeStorageAmounts
 
 #QUERY-DHT COMMAND
 #
@@ -290,13 +297,7 @@ def Peer():
     peer_ip = ""
     m_port = 0
     p_port = 0
-    
-    #LEADER ONLY VARIABLES
-    leader_identifier = 0
-    leader_neighbor_name = ""
-    leader_neighbor_IP =""
-    leader_neighbor_port = 0
-    leader_recordList = {} #dictionary to store leaders hash table keyed by eventID
+    #Leader variable
     nodeStorageAmounts = {} # dictionary to store how many records are at each node
 
     #Command line Input Validation
@@ -337,7 +338,7 @@ def Peer():
             setup_dht_result = setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT)
             #check if setup was successful and extract values
             if setup_dht_result:
-                leader_neighbor_IP, leader_neighbor_port, nodeStorageAmounts, leader_recordList = setup_dht_result
+                nodeStorageAmounts = setup_dht_result
 
         elif command == "query-dht":
             #QUERY-DHT COMMAND
