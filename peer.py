@@ -3,6 +3,7 @@ import sys
 import threading
 import csv
 import random
+import time
 #utility imports
 from utils import send_message, read_message, count_storm_events_csv, compute_hashes, find_next_prime, is_prime, print_record
 
@@ -10,6 +11,7 @@ from utils import send_message, read_message, count_storm_events_csv, compute_ha
 DHT_RING_SIZE = 0 # tracks size of DHT ring
 hash_size = 0 #hash table size for computing pos and id
 peers = [] #list of peers in the DHT
+DHT_READY = False # prevents race condition in storing records
 
 #CUSTOM DATA STRUCTURES
 #   Record stores the 14 fields required as an object for easy parsing and storage as well as the pos and id
@@ -39,6 +41,7 @@ def peer2peer_Listener(peer2peer_socket):
     global hash_size
     global DHT_RING_SIZE
     global peers
+    global DHT_READY
     #Peer to Peer Variables
     identifier = 0
     ring_size = 0
@@ -72,19 +75,17 @@ def peer2peer_Listener(peer2peer_socket):
             DHT_RING_SIZE = ring_size
             peers = peer_list
             
-
-            #Temporary print statement for visualization
-            print(f"ID: {identifier}, Ring_size: {DHT_RING_SIZE}, Hash_size: {hash_size}")
             #Determine right neighbor id and index in tuples
             neighbor_id = (identifier + 1) % ring_size
             neighbor_ip = peer_list[neighbor_id]["ip"]
             neighbor_pPort = peer_list[neighbor_id]["p_port"]
+            DHT_READY = True
 
         elif peer_command == "store":
             #STORE COMMAND
 
             #Wait until peer is setup to prevent race condition
-            while not neighbor_ip:
+            while not DHT_READY:
                 continue
 
             #EXTRACT DATA from body
@@ -119,8 +120,6 @@ def peer2peer_Listener(peer2peer_socket):
 
             #COMPUTE POS AND ID FOR EVENT
             curr_pos, curr_id = compute_hashes(hash_size, DHT_RING_SIZE, int(event_id))
-
-            print(f"[DEBUG find-event] event_id={event_id}, curr_id={curr_id}, identifier={identifier}, unvisited={unvisited}, peerRecordList keys={list(peerRecordList.keys())[:5]}")
 
             #update id_seq and unvisited_nodes
             id_seq.append(identifier)
@@ -276,7 +275,9 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
         #send peer to peer message
         send_message(peer2Peer_socket, (peer["ip"], peer["p_port"]), "set-id", peer_assignment_body)
     
-    
+    #wait until all set-ids are set before parsing csv to prevent race condition and lost records
+    while not DHT_READY:
+        continue
 
     #Loop over all storm events
     with open(selected_file, newline='') as stormcsv:
@@ -307,6 +308,7 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
             send_message(peer2Peer_socket, (peers[0]["ip"], peers[0]["p_port"]), "store", store_command_body)
             #increment node storage amount for identifier
             nodeStorageAmounts[curr_id] = nodeStorageAmounts[curr_id] + 1
+            time.sleep(0.0001)
 
     #PRINT DHT STATUS
     print("Records Distributed:")
@@ -352,7 +354,6 @@ def query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager
     query_peer_p_port = body["p_port"]
     #Build find-event message
     find_event_body = {"event_id": query_event_id, "S_name": peer_name, "S_ip": peer_ip, "S_port": p_port, "id_seq": [], "unvisited_nodes": [], "first_node": True}
-    print(f"[DEBUG query] hash_size={hash_size}, DHT_RING_SIZE={DHT_RING_SIZE}, unvisited={list(range(DHT_RING_SIZE))}")
     #send find-event message
     send_message(peer2Peer_socket, (query_peer_ip, query_peer_p_port), "find-event", find_event_body)
     #Print status for starting search
