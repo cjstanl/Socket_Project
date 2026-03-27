@@ -93,8 +93,3 @@ def is_prime(num):
             return False
 
     return True
-#MANAGER FUNCTIONS
-
-
-
-#PEER FUNCTIONS

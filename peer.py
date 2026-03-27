@@ -5,6 +5,11 @@ import csv
 #utility imports
 from utils import send_message, read_message, count_storm_events_csv, compute_hashes, find_next_prime, is_prime
 
+#GLOBAL VARIABLES
+DHT_RING_SIZE = 0 # tracks size of DHT ring
+hash_size = 0 #hash table size for computing pos and id
+peers = [] #list of peers in the DHT
+
 #CUSTOM DATA STRUCTURES
 #   Record stores the 14 fields required as an object for easy parsing and storage as well as the pos and id
 class Record:
@@ -86,7 +91,7 @@ def peer2peer_Listener(peer2peer_socket):
 
 
 #PEER CLI COMMANDS
-#SETUP-PEER
+#SETUP-PEER INTERNAL COMMAND
 #
 def setup_peer(tokens, peer2Peer_socket, peer2Manager_socket):
 	#INPUT VALIDATION
@@ -112,7 +117,7 @@ def setup_peer(tokens, peer2Peer_socket, peer2Manager_socket):
 	print("Peer is setup")
 	return peer_name, peer_ip, m_port, p_port
 
-#REGISTER PEER
+#REGISTER PEER COMMAND
 #
 def register_peer(peer_name, peer_ip, m_port, p_port, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
 	#Build message
@@ -129,9 +134,13 @@ def register_peer(peer_name, peer_ip, m_port, p_port, peer2Manager_socket, MANAG
 	else:
 		print("REGISTERED")
 
-#SETUP_DHT
+#SETUP-DHT COMMAND
 #
 def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
+    #bring in global variables for ease of access later
+    global DHT_RING_SIZE
+    global hash_size
+    global peers
     #INPUT VALIDATION
     #Input: command n YYYY
     if len(tokens) != 3:
@@ -239,8 +248,37 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
         return
     print("DHT SETUP COMPLETE")
     #Return leader variables to main loop
-    return leader_neighbor_IP, leader_neighbor_port, DHT_RING_SIZE, nodeStorageAmounts, leader_recordList
+    return leader_neighbor_IP, leader_neighbor_port, nodeStorageAmounts, leader_recordList
 
+#QUERY-DHT COMMAND
+#
+def query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
+    #INPUT VALIDATION
+    if len(tokens) != 2:
+        print("USAGE ERROR: query_dht <event_id>")
+        return
+    #EXTRACT PARAMATER
+    query_event_id = int(tokens[1])
+    #Send query message to manager
+    send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "query-dht", peer_name)
+    #Get response
+    managerResponse_query, manager_address = peer2Manager_socket.recvfrom(4096)
+    #Read response
+    header, body = read_message(managerResponse_query)
+    #Check for failure
+    if header == "FAILURE":
+        print("QUERY FAILED")
+        return
+    #Extract response paramaters
+    query_peer_name = body["name"]
+    query_peer_ip = body["ip"]
+    query_peer_p_port = body["p_port"]
+    #Build find-event message
+    find_event_body = {"event_id": query_event_id, "hash_size": hash_size, "ring_size": DHT_RING_SIZE, "peer_list": peers, "S_name": peer_name, "S_ip": peer_ip, "S_port": p_port, "id_seq": [], "unvisited_nodes": list(range(DHT_RING_SIZE))}
+    #send find-event message
+    send_message(peer2Peer_socket, (query_peer_ip, query_peer_p_port), "find-event", find_event_body)
+    #Print status for starting search
+    print(f"Searching for event {query_event_id} through peer {query_peer_name}.")
 #PEER
 #   Main Peer Function with stdin command interface
 def Peer():
@@ -258,7 +296,6 @@ def Peer():
     leader_neighbor_name = ""
     leader_neighbor_IP =""
     leader_neighbor_port = 0
-    DHT_RING_SIZE = 0
     leader_recordList = {} #dictionary to store leaders hash table keyed by eventID
     nodeStorageAmounts = {} # dictionary to store how many records are at each node
 
@@ -300,11 +337,11 @@ def Peer():
             setup_dht_result = setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT)
             #check if setup was successful and extract values
             if setup_dht_result:
-                leader_neighbor_IP, leader_neighbor_port, DHT_RING_SIZE, nodeStorageAmounts, leader_recordList = setup_dht_result
+                leader_neighbor_IP, leader_neighbor_port, nodeStorageAmounts, leader_recordList = setup_dht_result
 
         elif command == "query-dht":
             #QUERY-DHT COMMAND
-            print("COMMAND NOT SUPPORTED")
+            query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT)
         elif command == "leave-dht":
             #LEAVE-DHT COMMAND
             print("COMMAND NOT SUPPORTED")
