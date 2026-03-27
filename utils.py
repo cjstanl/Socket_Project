@@ -93,3 +93,21 @@ def is_prime(num):
             return False
 
     return True
+
+def print_record(record):
+    #prints record
+    print(f"Storm Event Found:")
+    print(f"Event ID: {record['EVENT_ID']}")
+    print(f"State: {record['STATE']}")
+    print(f"Year: {record['YEAR']}")
+    print(f"Month: {record['MONTH']}")
+    print(f"Event Type: {record['EVENT_TYPE']}")
+    print(f"CZ Type: {record['CZ_TYPE']}")
+    print(f"CZ Name: {record['CZ_NAME']}")
+    print(f"Direct Injuries: {record['INJURIES_DIRECT']}")
+    print(f"Indirect Injuries: {record['INJURIES_INDIRECT']}")
+    print(f"Direct Deaths: {record['DEATHS_DIRECT']}")
+    print(f"Indirect Deaths: {record['DEATHS_INDIRECT']}")
+    print(f"Property Damage: {record['DAMAGE_PROPERTY']}")
+    print(f"Crops Damage: {record['DAMAGE_CROPS']}")
+    print(f"Tornado F Scale: {record['TOR_F_SCALE']}")

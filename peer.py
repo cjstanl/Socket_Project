@@ -2,8 +2,9 @@ import socket
 import sys
 import threading
 import csv
+import random
 #utility imports
-from utils import send_message, read_message, count_storm_events_csv, compute_hashes, find_next_prime, is_prime
+from utils import send_message, read_message, count_storm_events_csv, compute_hashes, find_next_prime, is_prime, print_record
 
 #GLOBAL VARIABLES
 DHT_RING_SIZE = 0 # tracks size of DHT ring
@@ -34,6 +35,10 @@ class Record:
 #Thread to listen for peer to peer messages
 #   - Function takes the peer socket and listens infintely for peer messages
 def peer2peer_Listener(peer2peer_socket):
+    #import global variables for updating
+    global hash_size
+    global DHT_RING_SIZE
+    global peers
     #Peer to Peer Variables
     identifier = 0
     ring_size = 0
@@ -58,12 +63,18 @@ def peer2peer_Listener(peer2peer_socket):
         #PEER-PEER COMMAND DECISION TREE
         if peer_command == "set-id":
             #SET-ID COMMAND
-
+            
             #EXTRACT DHT DATA
             identifier = body["peer_id"]
             ring_size = body["ring_size"]
             peer_list = body["peer_list"]
+            hash_size = body["hash_size"]
+            DHT_RING_SIZE = ring_size
+            peers = peer_list
             
+
+            #Temporary print statement for visualization
+            print(f"ID: {identifier}, Ring_size: {DHT_RING_SIZE}, Hash_size: {hash_size}")
             #Determine right neighbor id and index in tuples
             neighbor_id = (identifier + 1) % ring_size
             neighbor_ip = peer_list[neighbor_id]["ip"]
@@ -94,19 +105,76 @@ def peer2peer_Listener(peer2peer_socket):
             
             #EXTRACT PARAMETERS
             event_id = body["event_id"]
-            curr_hash_size = body["hash_size"]
-            curr_ring_size = body["ring_size"]
-            curr_peer_list = body["peer_list"]
             S_ip = body["S_ip"]
             S_p_port = body["S_port"]
             id_seq = body["id_seq"]
             unvisited = body["unvisited_nodes"]
+            is_first_node = body["first_node"]
+
+            #check if node is the first visited to initialize unvisited list
+            if is_first_node:
+                unvisited = list(range(DHT_RING_SIZE))
+                #set flag to off
+                body["first_node"] = False
 
             #COMPUTE POS AND ID FOR EVENT
-            curr_pos, curr_id = compute_hashes(curr_hash_size, curr_ring_size, int(event_id))
+            curr_pos, curr_id = compute_hashes(hash_size, DHT_RING_SIZE, int(event_id))
+
+            print(f"[DEBUG find-event] event_id={event_id}, curr_id={curr_id}, identifier={identifier}, unvisited={unvisited}, peerRecordList keys={list(peerRecordList.keys())[:5]}")
 
             #update id_seq and unvisited_nodes
             id_seq.append(identifier)
+            if identifier in unvisited:
+                unvisited.remove(identifier)
+            
+            #check if id matches current peer
+            if curr_id == identifier:
+                #check local hash table
+                if str(event_id) in peerRecordList:
+                    #record found return record information
+                    #get record
+                    found_record = peerRecordList[str(event_id)]
+                    #build message with record information
+                    found_record_body = {"id_seq": id_seq, "command_type": "find-event", "record": {"EVENT_ID": found_record.event_id, "STATE": found_record.state, "YEAR": found_record.year, "MONTH": found_record.month_name, "EVENT_TYPE": found_record.event_type, "CZ_TYPE": found_record.cz_type, "CZ_NAME": found_record.cz_name, "INJURIES_DIRECT": found_record.injuries_direct, "INJURIES_INDIRECT": found_record.injuries_indirect, "DEATHS_DIRECT": found_record.deaths_direct, "DEATHS_INDIRECT": found_record.deaths_indirect, "DAMAGE_PROPERTY": found_record.damage_property, "DAMAGE_CROPS": found_record.damage_crops, "TOR_F_SCALE": found_record.tor_f_scale}}
+                    #send message back to S peer
+                    send_message(peer2peer_socket, (S_ip, S_p_port), "SUCCESS", found_record_body)
+                else:
+                    #record not found
+                    send_message(peer2peer_socket, (S_ip, S_p_port), "FAILURE", {"command_type": "find-event", "event_id": event_id})
+            else:
+                #ID doen't match, propogate around the ring
+                #check if all nodes have been visited to prevent infinite loop
+                if len(unvisited)==0:
+                    send_message(peer2peer_socket, (S_ip, S_p_port), "FAILURE", {"command_type": "find-event", "event_id": event_id})
+                else:
+                    #send to random next node
+                    #get random unvisited node id
+                    next_node_id = random.choice(unvisited)
+                    #get next peer info from peer list
+                    next_node = peers[next_node_id]
+                    #update id_seq and unvisited_nodes for next search
+                    body["id_seq"] = id_seq
+                    body["unvisited_nodes"] = unvisited
+                    send_message(peer2peer_socket, (next_node["ip"], next_node["p_port"]), "find-event", body) 
+
+        elif peer_command == "SUCCESS":
+            #Get Command Type
+            command_type = body["command_type"]
+            if command_type == "find-event":
+                #find event success, get record and id_seq
+                record = body["record"]
+                id_seq = body["id_seq"]
+                print_record(record)
+                print(f"ID_SEQ: {id_seq}")
+        elif peer_command == "FAILURE":
+            #get command type
+            command_type = body["command_type"]
+            if command_type == "find-event":
+                #find event failure get event id
+                event_id = body["event_id"]
+                print(f"Storm event {event_id} not found in the DHT.")
+
+
 
 
 #PEER CLI COMMANDS
@@ -191,15 +259,6 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
     #Initialize list to track storage amounts 
     nodeStorageAmounts = {} #dictionary to store how many records are at each node
 
-    #loop over remainder of peers starting at index 1 to exclude leader
-    for i in range(0, len(peers)):
-        peer = peers[i] #get current peer
-        nodeStorageAmounts[i] = 0 #initialize node count to 0
-        #build message for peer to peer id and neighbor assignments
-        peer_assignment_body = {"peer_id": i, "ring_size": DHT_RING_SIZE, "peer_list": peers}
-        #send peer to peer message
-        send_message(peer2Peer_socket, (peer["ip"], peer["p_port"]), "set-id", peer_assignment_body)
-    
     #PARSING CSV FILE
     #Build filename
     selected_file = "Data/details_" + str(year) + ".csv"
@@ -207,6 +266,17 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
     num_of_events = count_storm_events_csv(selected_file)
     #compute hash table size
     hash_size = find_next_prime(num_of_events)
+
+    #loop over peers to send set-id commands
+    for i in range(0, len(peers)):
+        peer = peers[i] #get current peer
+        nodeStorageAmounts[i] = 0 #initialize node count to 0
+        #build message for peer to peer id and neighbor assignments
+        peer_assignment_body = {"peer_id": i, "ring_size": DHT_RING_SIZE, "peer_list": peers, "hash_size": hash_size}
+        #send peer to peer message
+        send_message(peer2Peer_socket, (peer["ip"], peer["p_port"]), "set-id", peer_assignment_body)
+    
+    
 
     #Loop over all storm events
     with open(selected_file, newline='') as stormcsv:
@@ -241,7 +311,7 @@ def setup_dht(tokens, peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_
     #PRINT DHT STATUS
     print("Records Distributed:")
     for key, value in nodeStorageAmounts.items():
-        print(f"Node: {key}, Records Stored: {value}")
+        print(f"Node: {peers[key]['name']}, ID: {key}, Records Stored: {value}")
     
     #Send DHT-Complete Message to Manager
     send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "dht-complete", peer_name)
@@ -281,7 +351,8 @@ def query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager
     query_peer_ip = body["ip"]
     query_peer_p_port = body["p_port"]
     #Build find-event message
-    find_event_body = {"event_id": query_event_id, "hash_size": hash_size, "ring_size": DHT_RING_SIZE, "peer_list": peers, "S_name": peer_name, "S_ip": peer_ip, "S_port": p_port, "id_seq": [], "unvisited_nodes": list(range(DHT_RING_SIZE))}
+    find_event_body = {"event_id": query_event_id, "S_name": peer_name, "S_ip": peer_ip, "S_port": p_port, "id_seq": [], "unvisited_nodes": [], "first_node": True}
+    print(f"[DEBUG query] hash_size={hash_size}, DHT_RING_SIZE={DHT_RING_SIZE}, unvisited={list(range(DHT_RING_SIZE))}")
     #send find-event message
     send_message(peer2Peer_socket, (query_peer_ip, query_peer_p_port), "find-event", find_event_body)
     #Print status for starting search
