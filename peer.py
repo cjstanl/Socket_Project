@@ -12,6 +12,9 @@ DHT_RING_SIZE = 0 # tracks size of DHT ring
 hash_size = 0 #hash table size for computing pos and id
 peers = [] #list of peers in the DHT
 DHT_READY = False # prevents race condition in storing records
+neighbor_ip = "" #tracks address of neighbor in DHT ring
+neighbor_p_port = 0 # tracks neighbors peer 2 peer port in DHT ring
+neighbor_id = 0 # tracks identifier for neightbor in DHT ring
 
 #CUSTOM DATA STRUCTURES
 #   Record stores the 14 fields required as an object for easy parsing and storage as well as the pos and id
@@ -36,17 +39,15 @@ class Record:
 
 #Thread to listen for peer to peer messages
 #   - Function takes the peer socket and listens infintely for peer messages
-def peer2peer_Listener(peer2peer_socket):
+def peer2peer_Listener(peer2peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
     #import global variables for updating
     global hash_size
     global DHT_RING_SIZE
     global peers
     global DHT_READY
-    #Peer to Peer Variables
-    identifier = 0
-    ring_size = 0
-    neighbor_ip = ""
-    neighbor_pPort = 0
+    global neighbor_id
+    global neighbor_ip
+    global neighbor_p_port
 
     peerRecordList = {} #dictionary to store records keyed by eventID
 
@@ -78,7 +79,7 @@ def peer2peer_Listener(peer2peer_socket):
             #Determine right neighbor id and index in tuples
             neighbor_id = (identifier + 1) % ring_size
             neighbor_ip = peer_list[neighbor_id]["ip"]
-            neighbor_pPort = peer_list[neighbor_id]["p_port"]
+            neighbor_p_port = peer_list[neighbor_id]["p_port"]
             DHT_READY = True
 
         elif peer_command == "store":
@@ -95,7 +96,7 @@ def peer2peer_Listener(peer2peer_socket):
 
             #Check ID does not match to propogate around the ring
             if curr_id != identifier:
-                send_message(peer2peer_socket, (neighbor_ip, neighbor_pPort), "store", body)
+                send_message(peer2peer_socket, (neighbor_ip, neighbor_p_port), "store", body)
                 continue
 
             #If ID matches store in recordList
@@ -156,6 +157,30 @@ def peer2peer_Listener(peer2peer_socket):
                     body["unvisited_nodes"] = unvisited
                     send_message(peer2peer_socket, (next_node["ip"], next_node["p_port"]), "find-event", body) 
 
+        elif peer_command == "teardown":
+            #TEARDOWN COMMAND
+            #get initiating peer (Leader)
+            initiating_peer = body["initiating_peer"]
+            #delete local hash table
+            peerRecordList.clear()
+            #check if Leader
+            if peers[identifier]["name"] == initiating_peer:
+                #send teardown complete message to manager
+                send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "teardown-complete", initiating_peer)
+                print("TEARDOWN COMPLETE")
+            else:
+                #propogate teardown around the ring
+                send_message(peer2peer_socket, (neighbor_ip, neighbor_p_port), "teardown", body)
+
+            #RESET GLOBAL VARIABLES
+            DHT_READY = False
+            DHT_RING_SIZE = 0
+            hash_size = 0
+            peers = []
+            neighbor_ip = ""
+            neighbor_p_port = 0
+            neighbor_id = 0
+
         elif peer_command == "SUCCESS":
             #Get Command Type
             command_type = body["command_type"]
@@ -179,7 +204,7 @@ def peer2peer_Listener(peer2peer_socket):
 #PEER CLI COMMANDS
 #SETUP-PEER INTERNAL COMMAND
 #
-def setup_peer(tokens, peer2Peer_socket, peer2Manager_socket):
+def setup_peer(tokens, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
 	#INPUT VALIDATION
 	if len(tokens) != 5:
 		print("USAGE ERROR: peer-setup <peer name> <peer ip> <manager port> <peer port>")
@@ -196,7 +221,7 @@ def setup_peer(tokens, peer2Peer_socket, peer2Manager_socket):
 	peer2Manager_socket.bind((peer_ip, m_port))
 
 	#start peer listening thread for peer to peer commands
-	peer_thread = threading.Thread(target=peer2peer_Listener, args=(peer2Peer_socket,))
+	peer_thread = threading.Thread(target=peer2peer_Listener, args=(peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT))
 	peer_thread.start()
 
 	#Output status
@@ -358,6 +383,29 @@ def query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager
     send_message(peer2Peer_socket, (query_peer_ip, query_peer_p_port), "find-event", find_event_body)
     #Print status for starting search
     print(f"Searching for event {query_event_id} through peer {query_peer_name}.")
+
+#LEAVE-DHT COMMAND
+#
+
+#JOIN_DHT COMMAND
+#
+
+#TEARDOWN-DHT COMMAND
+#
+def teardown_dht(peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
+    #Send teardwon message to manager
+    send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "teardown-dht", peer_name)
+    #get manager response
+    teardown_response, manager_address = peer2Manager_socket.recvfrom(4096)
+    #read response
+    header, body = read_message(teardown_response)
+    #check for failure
+    if header == "FAILURE":
+        print("TEARDOWN-DHT FAILED")
+        return
+    #send teardown message around ring
+    send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", {"initiating_peer": peer_name})
+    print("TEARDOWN INITIATIED")
 #PEER
 #   Main Peer Function with stdin command interface
 def Peer():
@@ -415,6 +463,7 @@ def Peer():
         elif command == "query-dht":
             #QUERY-DHT COMMAND
             query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT)
+
         elif command == "leave-dht":
             #LEAVE-DHT COMMAND
             print("COMMAND NOT SUPPORTED")
@@ -429,10 +478,8 @@ def Peer():
             print("COMMAND NOT SUPPORTED")
         elif command == "teardown-dht":
             #TEARDOWN-DHT
-            print("COMMAND NOT SUPPORTED")
-        elif command == "teardown-complete":
-            #TEARDOWN-COMPLETE
-            print("COMMAND NOT SUPPORTED")
+            teardown_dht(peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT)
+
         elif command == "peer-setup":
             #SETUP PEER COMMAND
             #Duplicate Setup protection
@@ -440,7 +487,7 @@ def Peer():
                 print("ERROR Peer already setup")
                 continue 
             #call setup peer function
-            peer_setup_result = setup_peer(tokens, peer2Peer_socket, peer2Manager_socket)
+            peer_setup_result = setup_peer(tokens, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT)
             #check if setup was successful and extract values
             if peer_setup_result:
                 peer_name, peer_ip, m_port, p_port = peer_setup_result
