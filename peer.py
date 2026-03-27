@@ -386,7 +386,8 @@ def query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager
 
 #LEAVE-DHT COMMAND
 #
-
+def leave_dht(peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
+    
 #JOIN_DHT COMMAND
 #
 
