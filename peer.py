@@ -161,13 +161,31 @@ def peer2peer_Listener(peer2peer_socket, peer2Manager_socket, MANAGER_IP, MANAGE
             #TEARDOWN COMMAND
             #get initiating peer (Leader)
             initiating_peer = body["initiating_peer"]
+            #get teardown command type (for leave-dht check)
+            teardown_type = body["teardown_type"]
             #delete local hash table
             peerRecordList.clear()
             #check if Leader
             if peers[identifier]["name"] == initiating_peer:
-                #send teardown complete message to manager
-                send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "teardown-complete", initiating_peer)
-                print("TEARDOWN COMPLETE")
+                #check command type
+                if teardown_type == "teardown-standard":
+                    #send teardown complete message to manager
+                    send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "teardown-complete", initiating_peer)
+                    print("TEARDOWN COMPLETE")
+                elif teardown_type == "leave-dht":
+                    #leave teardown is finished, start reset-id loop
+                    #remove initiating peer from peer list and extract initiating peer information
+                    peer_u = None
+                    new_peers = []
+                    for peer in peers:
+                        if peer["name"] != initiating_peer:
+                            new_peers.append(peer)
+                        else:
+                            peer_u = peer
+                    #get new ring size
+                    new_ring_size = len(new_peers)
+                    #send reset-id command to neighbor
+                    send_message(peer2peer_socket, (neighbor_ip, neighbor_p_port), "reset-id", {"peer_list": new_peers, "ring_size": new_ring_size, "current_id": 0, "initiating_peer": initiating_peer, "initiating_peer_ip": peer_u["ip"], "initiating_peer_port": peer_u["p_port"]})
             else:
                 #propogate teardown around the ring
                 send_message(peer2peer_socket, (neighbor_ip, neighbor_p_port), "teardown", body)
@@ -180,6 +198,34 @@ def peer2peer_Listener(peer2peer_socket, peer2Manager_socket, MANAGER_IP, MANAGE
             neighbor_ip = ""
             neighbor_p_port = 0
             neighbor_id = 0
+
+        elif peer_command == "reset-id":
+            #RESET-ID COMMAND
+            #extract command parameters
+            new_peers = body["peer_list"]
+            new_ring_size = body["ring_size"]
+            curr_id = body["current_id"]
+            initiating_peer = body["initiating_peer"]
+            initiating_peer_ip = body["initiaing_peer_ip"]
+            initiating_peer_port = body["initiating_peer_port"]
+            #check if loop has returned to peer u
+            if peer[identifier]["name"] == initiating_peer:
+                #reset-id complete
+                #initiate rebuild-dht command
+                new_leader = new_peers[0]
+                send_message(peer2peer_socket, (new_leader["ip"], new_leader["p_port"]), "rebuild-dht", {})
+            else:
+                #update identifiers and DHT information
+                identifier = curr_id
+                neighbor_id = (identifier + 1) % new_ring_size
+                neighbor_ip = new_peers[neighbor_id]["ip"]
+                neighbor_p_port = new_peers[neighbor_id]["p_port"]
+                DHT_RING_SIZE = new_ring_size
+                peers = new_peers
+                #propogate reset-id command around the ring
+                #increment current id
+                body["current_id"] = curr_id + 1
+                send_message(peer2peer_socket, (neighbor_ip, neighbor_p_port), "reset-id", body)
 
         elif peer_command == "SUCCESS":
             #Get Command Type
@@ -387,6 +433,19 @@ def query_dht(tokens, peer_name, peer_ip, p_port, peer2Peer_socket, peer2Manager
 #LEAVE-DHT COMMAND
 #
 def leave_dht(peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, MANAGER_PORT):
+    #send leave dht message to manager
+    send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "leave-dht", peer_name)
+    #get response
+    leave_response, manager_address = peer2Manager_socket.recvfrom(4096)
+    #read response
+    header, body = read_message(leave_response)
+    #check for failure
+    if header == "FAILURE":
+        print("LEAVE-DHT FAILED")
+        return
+    #Initiate teardown 
+    send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", {"initiating_peer": peer_name, "teardown_type": "leave-dht"})
+
     
 #JOIN_DHT COMMAND
 #
@@ -405,7 +464,7 @@ def teardown_dht(peer_name, peer2Peer_socket, peer2Manager_socket, MANAGER_IP, M
         print("TEARDOWN-DHT FAILED")
         return
     #send teardown message around ring
-    send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", {"initiating_peer": peer_name})
+    send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", {"initiating_peer": peer_name, "teardown_type": "teardown-standard"})
     print("TEARDOWN INITIATIED")
 #PEER
 #   Main Peer Function with stdin command interface
