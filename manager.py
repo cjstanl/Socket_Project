@@ -3,7 +3,7 @@ import sys
 import random
 import json
 #utility imports
-from utils import send_message, read_message
+from utils import send_message, read_message, Peer
 
 #MANAGER IP ADDRESS
 #for local testing:
@@ -21,23 +21,6 @@ DHT_SETUP_IN_PROGRESS = False #boolean to track if DHT is being setup
 DHT_REBUILD_IN_PROGRESS = False #tracks if leave/join rebuild is in progress
 DHT_TEARDOWN_IN_PROGRESS = False #tracks if teardown is in progress
 DHT_REBUILD_PEER = None # tracks which peer initiated the leave/join command
-
-#CUSTOM DATA STRUCTURES
-#Peer
-#   Structure to hold peers data for ease of access, a peer has the following attributes:
-#       - name: <15 character alphabetic string
-#       - ip: IPv4 Address associated with the peer
-#       - m_port: port for manager to peer communication
-#       - p_port: port for peer to peer communication
-#       - state: state of the peer (Free, Leader, InDHT)
-class Peer:
-    #Constructor
-    def __init__(self, name, ip, m_port, p_port, state):
-        self.name = name
-        self.ip = ip
-        self.m_port = m_port
-        self.p_port = p_port
-        self.state = state
 
 
 #COMMAND FUNCTIONS

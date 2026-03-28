@@ -2,6 +2,23 @@ import json
 import socket
 import csv
 
+#CUSTOM DATA STRUCTURES
+#Peer
+#   Structure to hold peers data for ease of access, a peer has the following attributes:
+#       - name: <15 character alphabetic string
+#       - ip: IPv4 Address associated with the peer
+#       - m_port: port for manager to peer communication
+#       - p_port: port for peer to peer communication
+#       - state: state of the peer (Free, Leader, InDHT)
+class Peer:
+    #Constructor
+    def __init__(self, name, ip, m_port, p_port, state):
+        self.name = name
+        self.ip = ip
+        self.m_port = m_port
+        self.p_port = p_port
+        self.state = state
+
 #UTILITY FUNCTIONS for manager and peer
 
 #GENERAL FUNCTIONS
