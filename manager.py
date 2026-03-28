@@ -237,13 +237,23 @@ def join_dht(manager_socket, peer_address, body):
 		send_message(manager_socket, peer_address, "FAILURE")
 		return
 	
+	#choose random peer
+	PEER_SELECTED = False
+	while not PEER_SELECTED:
+		random_name, random_peer = random.choice(list(peer_list.items()))
+		if random_peer.state != "InDHT" and random_peer.state != "Leader":
+			continue
+		PEER_SELECTED = True
+
 	#UPDATE DHT STATUS
 	DHT_EXISTS = False
 	DHT_REBUILD_IN_PROGRESS = True
 	#record which peer initiated join command
 	DHT_REBUILD_PEER = peer_name
 	#send success message
-	send_message(manager_socket, peer_address, "SUCCESS")
+	#build join message
+	join_messsage_body = {"name": random_name, "ip": random_peer.ip, "p_port": random_peer.p_port}
+	send_message(manager_socket, peer_address, "SUCCESS", join_messsage_body)
 
 #DHT-REBUILT COMMAND
 #
