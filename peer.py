@@ -30,7 +30,8 @@ nodeStorageAmounts = {} #dictionary to store how many records are at each node
 csv_file = "" #tracks name of csv file to be read for rebuilding the dht
 LEAVE_COMPLETE = False # tracks if leave operation is complete
 JOIN_COMPLETE = False # tracks if join operation is complete
-JOIN_READY = False
+JOIN_PENDING_PEER_IP = ""
+JOIN_PENDING_PEER_PORT = 0
 
 #CUSTOM DATA STRUCTURES
 #   Record stores the 14 fields required as an object for easy parsing and storage as well as the pos and id
@@ -68,8 +69,9 @@ def peer2peer_Listener():
     global identifier
     global LEAVE_COMPLETE
     global csv_file
-    global JOIN_READY
     global JOIN_COMPLETE
+    global JOIN_PENDING_PEER_IP
+    global JOIN_PENDING_PEER_PORT
 
     peerRecordList = {} #dictionary to store records keyed by eventID
 
@@ -188,12 +190,26 @@ def peer2peer_Listener():
             if this_peer.name == initiating_peer:
                 peerRecordList.clear()
                 TEARDOWN_COMPLETE = True
+                #notify joining peer if pending
+                if JOIN_PENDING_PEER_IP:
+                    send_message(peer2Peer_socket, (JOIN_PENDING_PEER_IP, JOIN_PENDING_PEER_PORT), "teardown-acknowledge", {"peers_list": peers_list, "hash_size": hash_size, "csv_file": csv_file})
+
             else:
                 #propogate around the ring
                 peerRecordList.clear()
                 send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", body)
             
-            
+
+        elif peer_command == "teardown-acknowledge":
+            #TEARDOWN-ACKNOWLEDGE COMMAND
+
+            #set DHT info
+            peers_list = body["peers_list"]
+            hash_size = body["hash_size"]
+            csv_file = body["csv_file"]
+            #set teardown complete flag and reset joining IP
+            TEARDOWN_COMPLETE = True
+            JOIN_PENDING_PEER_IP = ""
 
         elif peer_command == "reset-id":
             #RESET-ID COMMAND
@@ -237,16 +253,15 @@ def peer2peer_Listener():
             send_message(peer2Peer_socket, (initiating_peer_ip, initiating_peer_port), "SUCCESS", {"command_type": "rebuild-dht", "new_leader": this_peer.name})
 
         
-        elif peer_command =="get-dht-info":
-            print("entering get-dht-info")
-            send_message(peer2Peer_socket, peer_address, "set-dht-info", {"peers_list": peers_list, "hash_size": hash_size, "csv_file": csv_file})
+        elif peer_command == "join":
+            #JOIN COMMAND
 
-        elif peer_command == "set-dht-info":
-            print("entering set dht info")
-            peers_list = body["peers_list"]
-            hash_size = body["hash_size"]
-            csv_file = body["csv_file"]
-            JOIN_READY = True
+            #store joining peers address
+            JOIN_PENDING_PEER_IP = body["joining_ip"]
+            JOIN_PENDING_PEER_PORT = body["joining_p_port"]
+
+            #INITIATIE TEARDOWN
+            send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", {"initiating_peer": this_peer.name})
 
         elif peer_command == "SUCCESS":
             #Get Command Type
@@ -582,9 +597,11 @@ def leave_dht():
 def join_dht():
     #IMPORT GLOBAL VARIABLES
     global TEARDOWN_COMPLETE
-    global JOIN_READY
     global JOIN_COMPLETE
     global DHT_RING_SIZE
+    global neighbor_ip
+    global neighbor_p_port
+
 
     #SEND JOIN-DHT MESSAGE TO MANAGER
     send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "join-dht", this_peer.name)
@@ -597,28 +614,18 @@ def join_dht():
         print("Join DHT operation failed")
         return
     
-    #EXTRACT PEER FOR REBUILD
-    rebuild_peer_name = body["name"]
-    rebuild_peer_ip = body["ip"]
-    rebuild_peer_p_port = body["p_port"]
+    #EXTRACT LEADER PEER FOR REBUILD
+    leader_name = body["name"]
+    leader_ip = body["ip"]
+    leader_p_port = body["p_port"]
 
-    print(f"Sending get info to {rebuild_peer_name}, at IP: {rebuild_peer_ip}, port: {rebuild_peer_p_port}")
+    #SEND JOIN MESSAGE TO LEADER
+    send_message(peer2Peer_socket, (leader_ip, leader_p_port), "join", {"joining_name": this_peer.name, "joining_ip": this_peer.ip, "joining_p_port": this_peer.p_port})
 
-    #request DHT information from rebuild peer
-    send_message(peer2Peer_socket, (rebuild_peer_ip, rebuild_peer_p_port), "get-dht-info")
-
-    #WAIT FOR DHT INFO TO BE SET
-    while not JOIN_READY:
-        continue
-    #reset join flag
-    JOIN_READY = False
-
-    #INITITATE TEARDOWN
-    send_message(peer2Peer_socket, (peers_list[1]["ip"], peers_list[1]["p_port"]), "teardown", {"initiating_peer": peers_list[0]["name"]})
-    #WAIT FOR JOIN TO COMPLETE
+    #WAIT FOR TEARDOWN TO COMPLETE
     while not TEARDOWN_COMPLETE:
         continue
-    #reset Join Flag
+    #reset join flag
     TEARDOWN_COMPLETE = False
 
     #BUILD NEW PEER LIST
