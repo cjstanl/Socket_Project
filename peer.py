@@ -30,8 +30,9 @@ nodeStorageAmounts = {} #dictionary to store how many records are at each node
 csv_file = "" #tracks name of csv file to be read for rebuilding the dht
 LEAVE_COMPLETE = False # tracks if leave operation is complete
 JOIN_COMPLETE = False # tracks if join operation is complete
-JOIN_PENDING_PEER_IP = ""
-JOIN_PENDING_PEER_PORT = 0
+JOIN_PENDING_PEER_IP = "" #holds joining peer IP address for join operation
+JOIN_PENDING_PEER_PORT = 0 #holds joining peer p_port for join operation
+JOIN_PENDING = False #tracks if a join operation is in progress
 
 #CUSTOM DATA STRUCTURES
 #   Record stores the 14 fields required as an object for easy parsing and storage as well as the pos and id
@@ -54,22 +55,39 @@ class Record:
         self.damage_crops = damage_crops
         self.tor_f_scale = tor_f_scale
 
-#Thread to listen for peer to peer messages
-#   - Function takes the peer socket and listens infintely for peer messages
+#PEER TO PEER THREAD LISTENER
+#   - Function takes the peer socket and listens infintely for peer messages and handles all peer to peer commands
+#   - Listens for messages and then reads them into a header and body for parsing
+#   - Thread is started as daemon for graceful exit on deregister
+#   - COMMANDS:
+#       - set-id: sets the global DHT info for the peer
+#       - store: handles storing of record at this peer or propogates around the ring
+#       - find-event: searches local DHT table for record event id
+#       - teardown: deletes local hash table and propogates to next node in DHT
+#       - teardown-acknowledge: ack command for teardown used in join-dht
+#       - reset-id: renumbering of identifiers for dht-rebuild
+#       - join: sets joining peer information and initiates rebuild process
+#       - SUCCESS: on receipt of success take the appropriate actions depending on rebuild or find event process
+#       - FAILURE: used for all nodes searched in find-event loop
+#       - exit: exits listening thread for graceful process termination on deregister
 def peer2peer_Listener():
     #IMPORT GLOBAL VARIABLES
+    #   - FLAGS
+    global TEARDOWN_COMPLETE
+    global JOIN_COMPLETE
+    global LEAVE_COMPLETE
+    global DHT_READY
+    global JOIN_PENDING
+    #   - DHT INFO
     global hash_size
     global DHT_RING_SIZE
-    global peers_list
-    global DHT_READY
+    global peers_list   
     global neighbor_id
     global neighbor_ip
     global neighbor_p_port
-    global TEARDOWN_COMPLETE
     global identifier
-    global LEAVE_COMPLETE
     global csv_file
-    global JOIN_COMPLETE
+    #   - JOININING PEER ADDRESS
     global JOIN_PENDING_PEER_IP
     global JOIN_PENDING_PEER_PORT
 
@@ -84,7 +102,7 @@ def peer2peer_Listener():
         #Check for empty message
         if not header:
             continue
-
+        
         #EXTRACT COMMAND
         peer_command = header
 
@@ -99,7 +117,7 @@ def peer2peer_Listener():
             hash_size = body["hash_size"]
             csv_file = body["csv_file"]
             
-            #Determine right neighbor id and index in tuples
+            #DETERMINE RIGHT NEIGHBOR ID, IP, AND P PORT
             neighbor_id = (identifier + 1) % DHT_RING_SIZE
             neighbor_ip = peers_list[neighbor_id]["ip"]
             neighbor_p_port = peers_list[neighbor_id]["p_port"]
@@ -165,7 +183,7 @@ def peer2peer_Listener():
                     #record not found
                     send_message(peer2Peer_socket, (S_ip, S_p_port), "FAILURE", {"command_type": "find-event", "event_id": event_id})
             else:
-                #ID doen't match, hot potato protocol
+                #ID DOESN'T MATCH: HOT POTATO PROTOCOL
                 #check if all nodes have been visited to prevent infinite loop
                 if len(unvisited)==0:
                     send_message(peer2Peer_socket, (S_ip, S_p_port), "FAILURE", {"command_type": "find-event", "event_id": event_id})
@@ -191,29 +209,31 @@ def peer2peer_Listener():
                 peerRecordList.clear()
                 TEARDOWN_COMPLETE = True
                 #notify joining peer if pending
-                if JOIN_PENDING_PEER_IP:
-                    send_message(peer2Peer_socket, (JOIN_PENDING_PEER_IP, JOIN_PENDING_PEER_PORT), "teardown-acknowledge", {"peers_list": peers_list, "hash_size": hash_size, "csv_file": csv_file})
-
+                if JOIN_PENDING:
+                    send_message(peer2Peer_socket, (JOIN_PENDING_PEER_IP, JOIN_PENDING_PEER_PORT), "teardown-acknowledge", {"peers_list": peers_list, "hash_size": hash_size, "csv_file": csv_file, "current_DHT_SIZE": DHT_RING_SIZE})
+                    #reset join pending flag
+                    JOIN_PENDING = False
             else:
                 #propogate around the ring
                 peerRecordList.clear()
                 send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", body)
             
-
         elif peer_command == "teardown-acknowledge":
             #TEARDOWN-ACKNOWLEDGE COMMAND
 
-            #set DHT info
+            #SET DHT INFO
             peers_list = body["peers_list"]
             hash_size = body["hash_size"]
             csv_file = body["csv_file"]
+            DHT_RING_SIZE = body["current_DHT_SIZE"]
+            DHT_READY = True
             #set teardown complete flag and reset joining IP
             TEARDOWN_COMPLETE = True
             JOIN_PENDING_PEER_IP = ""
 
         elif peer_command == "reset-id":
             #RESET-ID COMMAND
-            print("enter reset")
+
             #EXTRACT PARAMETERS
             initiating_peer = body["initiating_peer"]
             curr_id = body["current_id"]
@@ -239,7 +259,7 @@ def peer2peer_Listener():
 
         elif peer_command == "rebuild-dht":
             #REBUILD-DHT COMMAND
-            print("enter rebuild")
+            
             #EXTRACT PARAMETERS
             initiating_peer = body["initiating_peer"]
             initiating_peer_ip = body["initiating_peer_ip"]
@@ -248,25 +268,27 @@ def peer2peer_Listener():
             #Redistribute records
             DHT_READY = True
             store_DHT()
+            print_record_distribution()
 
             #SEND SUCCESS MESSAGE BACK TO INITIATING PEER
             send_message(peer2Peer_socket, (initiating_peer_ip, initiating_peer_port), "SUCCESS", {"command_type": "rebuild-dht", "new_leader": this_peer.name})
-
-        
+     
         elif peer_command == "join":
             #JOIN COMMAND
 
             #store joining peers address
             JOIN_PENDING_PEER_IP = body["joining_ip"]
             JOIN_PENDING_PEER_PORT = body["joining_p_port"]
-
+            #set JOIN pending flag
+            JOIN_PENDING = True
             #INITIATIE TEARDOWN
             send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", {"initiating_peer": this_peer.name})
 
         elif peer_command == "SUCCESS":
             #Get Command Type
             command_type = body["command_type"]
-            print(f"[DEBUG SUCCESS] received command_type={command_type}")
+
+            #SUCCESS DECISION TREE
             if command_type == "find-event":
                 #find event success, get record and id_seq
                 record = body["record"]
@@ -291,6 +313,7 @@ def peer2peer_Listener():
                     print("DHT rebuild has failed.")
                 LEAVE_COMPLETE = True
                 JOIN_COMPLETE = True
+
         elif peer_command == "FAILURE":
             #get command type
             command_type = body["command_type"]
@@ -299,12 +322,14 @@ def peer2peer_Listener():
                 event_id = body["event_id"]
                 print(f"Storm event {event_id} not found in the DHT.")
 
+        elif peer_command == "exit":
+            #EXIT COMMAND for graceful deregister and process stop
+            break
+
 
 #PEER UTILITY COMMANDS
 #STORE_DHT
 #   - This is an auxillary function to simplify the parsing of csv files and sending of store commands used in setup-dht and rebuild-dht
-#   - Parameter:
-#       - selected_file: file name of csv to be parsed
 #   - Message Format: Header = store, Body = <pos> <destination_id> <record>
 def store_DHT():
     #IMPORT GLOBAL VARIABLES
@@ -387,7 +412,6 @@ def setup_peer(tokens):
 
 	#start peer listening thread for peer to peer commands
     peer_thread = threading.Thread(target=peer2peer_Listener)
-    peer_thread.daemon = True
     peer_thread.start()
 
     #Setup successful
@@ -410,7 +434,7 @@ def register_peer():
     if header == "FAILURE":
         print(f"Peer {this_peer.name} failed to register.")
     else:
-        print(f"Peer {this_peer.name} is registered.")
+        print(f"Peer {this_peer.name} is registered with the manager.")
 
 #SETUP-DHT COMMAND
 #   -This function sets up the distributed hash table in accordance with the document specifications 1.1 and 1.2.1
@@ -518,8 +542,6 @@ def query_dht(tokens):
     if len(tokens) != 2:
         print("USAGE ERROR: query_dht <event_id>")
         return
-    
-    #IMPORT GLOBAL VARIABLES
 
     #EXTRACT PARAMATER
     query_event_id = int(tokens[1])
@@ -534,7 +556,8 @@ def query_dht(tokens):
     if header == "FAILURE":
         print("QUERY FAILED")
         return
-    #Extract response paramaters
+    
+    #EXTRACT PARAMETERS
     query_peer_name = body["name"]
     query_peer_ip = body["ip"]
     query_peer_p_port = body["p_port"]
@@ -548,11 +571,19 @@ def query_dht(tokens):
     print(f"Searching for event: {query_event_id}, through peer: {query_peer_name}.")
 
 #LEAVE-DHT COMMAND
-#
+#   - This function handles the leave operation for a node inside the DHT in accordance with the document specifications 1.1 and 1.2.3
+#   - Message Formats:
+#       - peer to manager leave-dht: Header = leave-dht, Body = <peer_name>
+#       - peer to peer reset-id: Header = reset-id, Body = <initiating_peer_ip> <initiating_peer_port> <current_id> <new_ring_size> <new_peer_list> <hash_size>
+#   - Response Formats:
+#       - manager to peer leave-dht: Header = SUCCESS/FAILURE, Body = NULL
 def leave_dht():
     #IMPORT GLOBAL VARIABLES
     global DHT_RING_SIZE
     global TEARDOWN_COMPLETE
+
+    #RESET TEARDOWN FLAG
+    TEARDOWN_COMPLETE = False
 
     #SEND LEAVE-DHT MESSAGE TO MANAGER
     send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "leave-dht", this_peer.name)
@@ -564,7 +595,7 @@ def leave_dht():
     if header == "FAILURE":
         print("Leave DHT operation failed")
         return
-    
+
     #INITIATE TEARDOWN
     teardown_dht()
     #wait until teardown is complete
@@ -587,20 +618,29 @@ def leave_dht():
     #set new ring size
     DHT_RING_SIZE = DHT_RING_SIZE - 1
 
-    #send reset-id command to right neighbor
+    #SEND RESET-ID MESSAGE TO NEIGHBOR
     send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "reset-id", {"initiating_peer": this_peer.name, "initiating_peer_ip": this_peer.ip, "initiating_peer_port": this_peer.p_port, "current_id": 0, "new_ring_size": DHT_RING_SIZE, "new_peers_list": new_peers_list, "hash_size": hash_size})
 
 
     
 #JOIN_DHT COMMAND
-#
+#   - This function handles the join operation for a node outside the DHT in accordance with the document specifications 1.1 and 1.2.4
+#   - Message Formats:
+#       - peer to manager join-dht: Header = join-dht, Body = <peer_name>
+#       - peer to leader join: Header = join, Body = <joining_peer_name> <joining_peer_ip> <joining_peer_p_port>
+#       - peer to peer reset-id: Header = reset-id, Body = <initiating_peer_name> <initiating_peer_ip> <initiating_peer_port> <current_id> <new_ring_size> <new_peer_list> <hash_size>
+#   - Response Formats:
+#       - manager to peer join-dht: Header = SUCCESS/FAILURE, Body = <leader_name> <leader_ip> <leader_p_port>
 def join_dht():
     #IMPORT GLOBAL VARIABLES
     global TEARDOWN_COMPLETE
     global JOIN_COMPLETE
     global DHT_RING_SIZE
+    global neighbor_id
     global neighbor_ip
     global neighbor_p_port
+    global identifier
+    global peers_list
 
 
     #SEND JOIN-DHT MESSAGE TO MANAGER
@@ -641,30 +681,46 @@ def join_dht():
         continue
     #reset join flag
     JOIN_COMPLETE = False
+
+    #SET DHT INFO FOR JOINING PEER
+    identifier = DHT_RING_SIZE - 1 #joining node will always be last
+    neighbor_id = 0
+    neighbor_ip = new_peers_list[0]["ip"]
+    neighbor_p_port = new_peers_list[0]["p_port"]
+    peers_list = new_peers_list
+
+    #JOIN COMPLETED
     print(f"Peer {this_peer.name} has joined the DHT.")
 
 #TEARDOWN-DHT COMMAND
 #   - This function deletes the DHT in a simple way so that it can be called from rebuild dht
 #   - Message Format: peer to peer teardown message: Header = teardown, Body = <initiating_peer>
 def teardown_dht():
-    #IMPORT GLOBAL VARIABLES
+
     #Send message to right neighbor
     send_message(peer2Peer_socket, (neighbor_ip, neighbor_p_port), "teardown", {"initiating_peer": this_peer.name})
     print("Teardown initiatied")
+
 #PEER
-#   Main Peer Function with stdin command interface
+#   - Main Peer Function takes commands from STDIN and interacts with system through UDP sockets to manager and other peer protocols
+#   - INPUT: peer.py <MANAGER_IP> <MANAGER_PORT>
+#   - EXIT: call deregister command to stop  listening thread and exit gracefully
 def Peer_Main():
     #IMPORT GLOBAL VARIABLES
+    #   -FLAGS
     global PEER_SETUP
-    global this_peer
+    global TEARDOWN_COMPLETE
+    #   -COMMUNICATION
     global MANAGER_IP
     global MANAGER_PORT
     global peer2Peer_socket
     global peer2Manager_socket
+    #   -PEER AND DHT VARIABLES
+    global this_peer
     global nodeStorageAmounts
-    global TEARDOWN_COMPLETE
+    
 
-    #Command line Input Validation
+    #PROCESS STARTUP CLI INPUT VALIDATION
     if len(sys.argv) != 3:
         print("USAGE ERROR: peer.py <MANAGER_IP> <MANAGER_PORT>")
         sys.exit(1)
@@ -673,9 +729,11 @@ def Peer_Main():
     MANAGER_IP = sys.argv[1]
     MANAGER_PORT = int(sys.argv[2])
 
+    #CREATE UDP SOCKETS
     #UDP sockets for peer-peer messages and peer-manager messages
     peer2Peer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     peer2Manager_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
 
     #STDIN INTERFACE
     for line in sys.stdin:
@@ -708,12 +766,15 @@ def Peer_Main():
         elif command == "leave-dht":
             #LEAVE-DHT COMMAND
             leave_dht()
+
         elif command == "join-dht":
             #JOIN-DHT COMMAND
             join_dht()
+            
         elif command == "deregister":
             #DEREGISTER COMMAND
-            #send deregister message to manager
+
+            #SEND DEREGISTER TO MANAGER
             send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "deregister", this_peer.name)
             #get response
             deregister_response, manager_address = peer2Manager_socket.recvfrom(4096)
@@ -723,12 +784,16 @@ def Peer_Main():
             if header == "FAILURE":
                 print("deregister failed")
             else:
+                #Successful deregister, exit program
+                #send thread exit command
+                send_message(peer2Peer_socket, (this_peer.ip, this_peer.p_port), "exit")
                 print(f"Peer {this_peer.name} is deregistered")
                 sys.exit(0)
 
         elif command == "teardown-dht":
-            #TEARDOWN-DHT
-            #Send teardown message to manager
+            #TEARDOWN-DHT COMMAND
+
+            #SEND TEARDOWN TO MANAGER
             send_message(peer2Manager_socket, (MANAGER_IP, MANAGER_PORT), "teardown-dht", this_peer.name)
             #get manager response
             teardown_response, manager_address = peer2Manager_socket.recvfrom(4096)
@@ -738,13 +803,14 @@ def Peer_Main():
             if header == "FAILURE":
                 print("DHT teardown has failed")
                 continue
-            #call Teardown
+
+            #CALL TEARDOWN FUNCTION
             teardown_dht()
             #WAIT FOR TEARDOWN TO FINISH
             while not TEARDOWN_COMPLETE:
                 continue
 
-            #Send teardown complete message to manager
+            #SEND TEARDOWN COMPLETE TO MANAGER
             send_message(peer2Manager_socket, manager_address, "teardown-complete", this_peer.name)
             #get manager response
             teardown_response_complete, manager_address = peer2Manager_socket.recvfrom(4096)
@@ -755,29 +821,31 @@ def Peer_Main():
                 print("Teardown has failed.")
             else:
                 print("Teardown is complete")
-            #reset teardown flag
+            #reset teardown flag for future use
             TEARDOWN_COMPLETE = False
 
         elif command == "peer-setup":
             #SETUP PEER COMMAND
+
             #Duplicate Setup protection
             if PEER_SETUP:
                 print("ERROR Peer already setup")
                 continue 
-            #call setup peer function
+
+            #CALL SETUP FUNCTION
             peer_setup_result = setup_peer(tokens)
             #check if setup was successful
             if peer_setup_result:
-                print(f"Peer {this_peer.name} is setup")
+                print(f"Peer {this_peer.name} is setup and ready to register.")
             else:
-                print("Peer Setup Failed")
+                print("Peer setup has failed")
 
         else:
             #UNKNOWN COMMAND
             print("COMMAND NOT SUPPORTED")
        
 
-#Call peer function
+#CALL PEER_MAIN FUNCTION
 if __name__ == "__main__":
     Peer_Main()
     
