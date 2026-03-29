@@ -21,12 +21,18 @@ DHT_SETUP_IN_PROGRESS = False #boolean to track if DHT is being setup
 DHT_REBUILD_IN_PROGRESS = False #tracks if leave/join rebuild is in progress
 DHT_TEARDOWN_IN_PROGRESS = False #tracks if teardown is in progress
 DHT_REBUILD_PEER = None # tracks which peer initiated the leave/join command
+peer_address = "" #address of peer sending current message
+body = None #current message body to be parsed
+manager_socket = None #socket to send/recieve messages for the manager to peer communication
 
 
 #COMMAND FUNCTIONS
 #REGISTER COMMAND:
-#	
-def register_peer(manager_socket, peer_address, body):
+#	- Executes manager operations for register in accordance with document specifications for 1.1.1
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = NULL
+def register_peer():
     #Tokenize json body for easy parsing
 	tokens = body.split()
 	
@@ -63,8 +69,11 @@ def register_peer(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS")
 
 #SETUP-DHT COMMAND
-#
-def setup_dht(manager_socket, peer_address, body):
+#	- Executes manager operations for setup DHT in accordance with document specifications for 1.1.2
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = <dht_size> <peers_list>
+def setup_dht():
 	#Tokenize json body for easy parsing
 	tokens = body.split()
 	
@@ -124,8 +133,11 @@ def setup_dht(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS", body_return)
 
 #DHT-COMPLETE COMMAND
-#
-def dht_complete(manager_socket, peer_address, body):
+#	- Executes manager operations for DHT complete in accordance with document specifications for 1.1.3
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = NULL
+def dht_complete():
 	#Tokenize json body for easy parsing
 	tokens = body.split()
 	
@@ -156,8 +168,11 @@ def dht_complete(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS")
 	
 #QUERY-DHT COMMAND
-#
-def query_dht(manager_socket, peer_address, body):
+#	- Executes manager operations for query DHT in accordance with document specifications for 1.1.4
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = <query peer name> <query peer ip> <query peer p port>
+def query_dht():
 	#VALIDATE DHT CONDITION
 	if not DHT_EXISTS:
 		send_message(manager_socket, peer_address, "FAILURE")
@@ -185,8 +200,11 @@ def query_dht(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS", query_body)
 	
 #LEAVE-DHT COMMAND
-#
-def leave_dht(manager_socket, peer_address, body):
+#	- Executes manager operations for leave DHT in accordance with document specifications for 1.1.5
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = NULL
+def leave_dht():
 	#import global variables
 	global DHT_EXISTS
 	global DHT_REBUILD_IN_PROGRESS
@@ -215,8 +233,11 @@ def leave_dht(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS")
 
 #JOIN-DHT COMMAND
-#
-def join_dht(manager_socket, peer_address, body):
+#	- Executes manager operations for join DHT in accordance with document specifications for 1.1.6
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = <leader name> <leader ip> <leader P port>
+def join_dht():
 	#import global variables
 	global DHT_EXISTS
 	global DHT_REBUILD_IN_PROGRESS
@@ -255,8 +276,11 @@ def join_dht(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS", join_messsage_body)
 
 #DHT-REBUILT COMMAND
-#
-def dht_rebuilt(manager_socket, peer_address, body):
+#	- Executes manager operations for DHT rebuilt in accordance with document specifications for 1.1.7
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = NULL
+def dht_rebuilt():
 	#import global variables
 	global DHT_EXISTS
 	global DHT_REBUILD_IN_PROGRESS
@@ -310,8 +334,11 @@ def dht_rebuilt(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS")
 
 #DEREGISTER COMMAND
-#
-def deregister(manager_socket, peer_address, body):
+#	- Executes manager operations for the deregister command
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = NULL
+def deregister():
 	#EXTRACT PARAMETER
 	peer_name = body.strip()
 
@@ -335,11 +362,15 @@ def deregister(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS")
 
 #TEARDOWN-DHT COMMAND
-#
-def teardown_dht(manager_socket, peer_address, body):
-	#import global variables
+#	- Executes manager operations for teardown DHT in accordance with document specifications for 1.1.9
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = NULL
+def teardown_dht():
+	#IMPORT GLOBAL VARIABLES
 	global DHT_EXISTS
 	global DHT_TEARDOWN_IN_PROGRESS
+
 	#EXTRACT PARAMETER
 	peer_name = body.strip()
 
@@ -364,8 +395,11 @@ def teardown_dht(manager_socket, peer_address, body):
 	send_message(manager_socket, peer_address, "SUCCESS")
 
 #TEARDOWN-COMPLETE COMMAND
-#
-def teardown_complete(manager_socket, peer_address, body):
+#	- Executes manager operations for teardown complete in accordance with document specifications for 1.1.10
+#	- Message Formats
+#		- FAILURE: header = FAILURE, body = NULL
+#		- SUCCESS: header = SUCCESS, body = NULL
+def teardown_complete():
 	#EXTRACT PARAMETER
 	peer_name = body.strip()
 
@@ -395,7 +429,8 @@ def teardown_complete(manager_socket, peer_address, body):
 #MANGER
 #   Main Manager Function that implements the always on manager server 
 def Manager():
-    
+    #IMPORT GLOBAL VARIABLES
+	global manager_socket
     #COMMAND LINE INPUT VALIDATION: Manager command line port
 	if len(sys.argv) != 2:
 		print("USAGE ERROR: python3 manager.py <listening port #>")
@@ -409,10 +444,12 @@ def Manager():
 	manager_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	manager_socket.bind((MANAGER_IP, MANAGER_PORT))
 
-
-
-    #Infinite Loop for reading messages
+    #INFINITE MANAGER LOOP
 	while True:
+		#IMPORT GLOBAL VARIABLES
+		global peer_address
+		global body
+
         #READ MESSAGES
 		payload, peer_address = manager_socket.recvfrom(4096)
         #Read json message
@@ -420,6 +457,7 @@ def Manager():
 		#Extract command from message
 		command = header
 
+		#BLOCKING COMMAND CHECK
         #Check if DHT is being setup, rebuilt, or torn down (block all except complete command)
 		if DHT_SETUP_IN_PROGRESS and command != "dht-complete":
 			send_message(manager_socket, peer_address, "FAILURE")
@@ -436,43 +474,43 @@ def Manager():
         #COMMAND DECISION TREE
 		if command == "register":
 			#REGISTER COMMAND
-			register_peer(manager_socket, peer_address, body)   
+			register_peer()   
 
 		elif command == "setup-dht":
             #SETUP-DHT COMMAND
-			setup_dht(manager_socket, peer_address, body)
+			setup_dht()
 
 		elif command == "dht-complete":
             #DHT-COMPLETE COMMAND
-			dht_complete(manager_socket, peer_address, body)
+			dht_complete()
 
 		elif command == "query-dht":
             #QUERY-DHT COMMAND
-			query_dht(manager_socket, peer_address, body)
+			query_dht()
 
 		elif command == "leave-dht":
             #LEAVE-DHT COMMAND
-			leave_dht(manager_socket, peer_address, body)
+			leave_dht()
             
 		elif command == "join-dht":
             #JOIN-DHT COMMAND
-			join_dht(manager_socket, peer_address, body)
+			join_dht()
             
 		elif command == "dht-rebuilt":
             #DHT-REBUILT
-			dht_rebuilt(manager_socket, peer_address, body)
+			dht_rebuilt()
 
 		elif command == "deregister":
             #DEREGISTER COMMAND
-			deregister(manager_socket, peer_address, body)
+			deregister()
             
 		elif command == "teardown-dht":
             #TEARDOWN-DHT
-			teardown_dht(manager_socket, peer_address, body)
+			teardown_dht()
             
 		elif command == "teardown-complete":
             #TEARDOWN-COMPLETE
-			teardown_complete(manager_socket, peer_address, body)
+			teardown_complete()
             
 		else:
             #UNKNOWN COMMAND
